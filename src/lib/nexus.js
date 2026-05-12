@@ -156,12 +156,20 @@ export async function attachButtons(env, messageId, buttons, options = {}) {
 /**
  * Send a "<bot> is typing..." indicator to a Nexus channel.
  *
- * Hits POST /api/bot/channels/:slug/typing (Bearer auth) which fans the
- * frame out through the channel's ChatRoom DO. The DO sets a 90s TTL on
- * each start; callers in long-running tool loops should re-send "start"
- * periodically (every ~60s) to keep the indicator alive. "stop" clears it
- * immediately (the auto-clear on bot message arrival also handles this,
- * so an explicit stop is mostly insurance for error paths).
+ * Hits POST /api/bot/typing (X-API-Key auth, same identity model as
+ * postToNexus) which fans the frame out through the channel's ChatRoom
+ * DO. The DO sets a 90s TTL on each start; callers in long-running tool
+ * loops should re-send "start" periodically (every ~60s) to keep the
+ * indicator alive. "stop" clears it immediately (the auto-clear on bot
+ * message arrival also handles this, so an explicit stop is mostly
+ * insurance for error paths).
+ *
+ * Why this uses the X-API-Key route, not the channel-gated Bearer route:
+ * the typing entry's user_id needs to match the eventual message's
+ * user_id so the DO's auto-clear-on-arrival logic lines up. The legacy
+ * X-API-Key path resolves keys to bot_<name> (underscore) while the
+ * channel-gated Bearer path uses bot-<name> (hyphen); we want the same
+ * id chain the post will use.
  *
  * Best-effort: never throws. A Nexus outage or auth misconfig must not
  * crash a chat handler or take down a tool loop.
@@ -180,18 +188,14 @@ export async function sendTyping(env, slug, action, options = {}) {
   if (!slug || typeof slug !== "string") return;
   try {
     const res = await fetch(
-      `${env.NEXUS_BASE_URL}/api/bot/channels/${encodeURIComponent(slug)}/typing`,
+      `${env.NEXUS_BASE_URL}/api/bot/typing`,
       {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          // Channel-gated typing route is Bearer-only (see Nexus
-          // worker/src/lib/bot-auth.js). The same per-bot key works for
-          // both X-API-Key (legacy /api/bot/messages) and Bearer (new
-          // channel-gated routes), so reuse the resolved key here.
-          Authorization: `Bearer ${apiKey}`,
+          "X-API-Key": apiKey,
         },
-        body: JSON.stringify({ state: action }),
+        body: JSON.stringify({ channel_slug: slug, action }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       },
     );
