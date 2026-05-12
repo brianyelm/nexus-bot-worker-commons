@@ -383,8 +383,17 @@ export async function handleChatMessage(request, env, ctx, config) {
     attachments,
   } = payload || {};
 
-  if (!user_id || !msgBody || !channel_slug) {
-    return json({ success: false, error: "Missing required fields: user_id, body, channel_slug" }, 400);
+  // user_id + channel_slug are always required. Body is optional when at
+  // least one attachment was supplied (drag-and-drop a PDF with no caption);
+  // the post-strip empty-text branch below produces a placeholder so the
+  // LLM still gets meaningful userText. Rejecting empty-body up-front here
+  // dropped attachment-only PDF drops on the floor (bug 2026-05-12).
+  const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+  if (!user_id || !channel_slug) {
+    return json({ success: false, error: "Missing required fields: user_id, channel_slug" }, 400);
+  }
+  if (!msgBody && !hasAttachments) {
+    return json({ success: false, error: "Missing required field: body (or attachments)" }, 400);
   }
 
   const historyKey = `nexus:${user_id}`;
@@ -392,8 +401,7 @@ export async function handleChatMessage(request, env, ctx, config) {
   // ---- 5. Strip @mention tokens --------------------------------------------
   // An empty body is fine when the user attached files (drag-and-drop +
   // @mention, no caption). Fall through to the LLM with a placeholder.
-  let userText = stripMention(msgBody);
-  const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
+  let userText = stripMention(msgBody || "");
   if (!userText) {
     if (!hasAttachments) {
       return json({ success: false, error: "Empty message after stripping mention" }, 400);
@@ -492,9 +500,14 @@ export async function handleChatMessage(request, env, ctx, config) {
   }
 
   // ---- 7. Ambient gate (checked AFTER !cmd so explicit commands always pass) -
+  // The trigger fn gets a 4th arg `meta` carrying out-of-band signals
+  // (attachments today; reactions/replies could grow in here). Older
+  // triggers ignore extra args; newer per-bot triggers can opt-in to fire
+  // on attachment-only drops where the body text alone would not match.
   if (trigger_type === "ambient") {
     const ambientFn = config.triggers?.ambient;
-    if (ambientFn && !ambientFn(msgBody, reply_to ?? null, null)) {
+    const meta = { attachments: Array.isArray(attachments) ? attachments : [] };
+    if (ambientFn && !ambientFn(msgBody || "", reply_to ?? null, null, meta)) {
       return json({ success: true, skipped: true });
     }
   }
