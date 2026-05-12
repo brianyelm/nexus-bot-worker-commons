@@ -120,7 +120,7 @@ export function asEmbedCard(title, body, color = DEFAULT_COMMAND_COLOR) {
  *   title?: string,
  *   color?: string,
  *   body?: string,
- *   fields?: Array<{name: string, value: string}>,
+ *   fields?: Array<{name: string, value: string, inline?: boolean}>,
  *   footer?: string,
  * }} opts
  * @returns {string}
@@ -139,8 +139,9 @@ export function asRichEmbedCard({ title = "", color = DEFAULT_COMMAND_COLOR, bod
   }
 
   // Field blocks. Each becomes a Discord-style label-above-value pair in
-  // the rendered card. We coerce non-string values to strings and skip
-  // entries that are missing a name, since an unlabelled field is useless.
+  // the rendered card. Inline fields are flagged with `inline:true` in the
+  // tag so the UI renderer can group them into a 2-column grid.
+  // We coerce non-string values to strings and skip entries missing a name.
   if (Array.isArray(fields)) {
     for (const f of fields) {
       if (!f || typeof f !== "object") continue;
@@ -148,7 +149,8 @@ export function asRichEmbedCard({ title = "", color = DEFAULT_COMMAND_COLOR, bod
       if (!name) continue;
       const rawValue = f.value === undefined || f.value === null ? "" : String(f.value);
       const value = rawValue.replace(/\n+$/, "");
-      lines.push(`[field name:${name}]`);
+      const inlineAttr = f.inline === true ? " inline:true" : "";
+      lines.push(`[field name:${name}${inlineAttr}]`);
       lines.push(value);
       lines.push(`[/field]`);
     }
