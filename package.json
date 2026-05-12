@@ -15,7 +15,8 @@
     "./lib/memory": "./src/lib/memory.js",
     "./lib/nexus": "./src/lib/nexus.js",
     "./lib/hitl": "./src/lib/hitl.js",
-    "./lib/triggers": "./src/lib/triggers.js"
+    "./lib/triggers": "./src/lib/triggers.js",
+    "./lib/attachments": "./src/lib/attachments.js"
   },
   "files": [
     "src/",

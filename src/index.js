@@ -42,3 +42,4 @@ export {
   BOT_COMMAND_COLORS,
   DEFAULT_COMMAND_COLOR,
 } from "./lib/embedCard.js";
+export { buildAttachmentContentBlocks } from "./lib/attachments.js";

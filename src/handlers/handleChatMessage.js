@@ -38,6 +38,7 @@ import { callAnthropicWithTools } from "../lib/anthropic.js";
 import { postToNexus, sendTyping } from "../lib/nexus.js";
 import { postApprovalCard } from "../lib/hitl.js";
 import { asEmbedCard, buildCommandTitle, colorForBot } from "../lib/embedCard.js";
+import { buildAttachmentContentBlocks } from "../lib/attachments.js";
 
 // Nexus @mention token pattern (e.g. @robert, @bot_robert)
 const MENTION_RE = /@\S+/g;
@@ -171,6 +172,7 @@ async function runLlmPipeline({
   userText,
   labeledUserText,
   historyKey,
+  attachments,
   config,
 }) {
   const nexusOptions = { nexusKeyEnvVar: config.nexusKeyEnvVar };
@@ -194,7 +196,36 @@ async function runLlmPipeline({
 
   try {
     history = await loadHistory(env, historyKey, { dbBinding: config.dbBinding });
-    history.push({ role: "user", content: labeledUserText });
+
+    // Multimodal hand-off. If Nexus surfaced any attachments on this turn,
+    // fetch each one through the internal-token route, base64-encode, and
+    // prepend as `document` / `image` content blocks BEFORE the text body
+    // so Claude reads the file before processing the prompt.
+    let userContent = labeledUserText;
+    let attachmentWarnings = [];
+    if (Array.isArray(attachments) && attachments.length > 0) {
+      const { blocks, warnings } = await buildAttachmentContentBlocks(env, attachments);
+      attachmentWarnings = warnings;
+      if (blocks.length > 0) {
+        const blockTextSummary = attachments
+          .map((a) => `${a.filename || a.id} (${a.mime_type || "unknown"})`)
+          .join(", ");
+        userContent = [
+          ...blocks,
+          {
+            type: "text",
+            text:
+              `${labeledUserText}\n\n` +
+              `[attached files: ${blockTextSummary}]` +
+              (warnings.length ? `\n[attachment warnings: ${warnings.join(" ")}]` : ""),
+          },
+        ];
+      } else if (warnings.length > 0) {
+        userContent = `${labeledUserText}\n\n[attachment warnings: ${warnings.join(" ")}]`;
+      }
+    }
+
+    history.push({ role: "user", content: userContent });
 
     const factsBlock = await buildFactsBlock(env, user_id, { dbBinding: config.dbBinding });
     const systemPromptWithFacts = factsBlock ? systemPrompt + factsBlock : systemPrompt;
@@ -280,8 +311,15 @@ async function runLlmPipeline({
   }
 
   // ---- Persist + post final response ---------------------------------------
+  // Persist a text-only marker of the attachments so future turns retain the
+  // breadcrumb that a file was present even though the bytes themselves are
+  // not re-fed into the next call (caching the LLM response on the prior turn
+  // is enough; we don't want to base64-replay every PDF every turn).
+  const attachmentBreadcrumb = Array.isArray(attachments) && attachments.length > 0
+    ? `\n[attached on this turn: ${attachments.map((a) => `${a.filename || a.id} (${a.mime_type || "?"})`).join(", ")}]`
+    : "";
   try {
-    await appendHistory(env, historyKey, "user", labeledUserText, { dbBinding: config.dbBinding });
+    await appendHistory(env, historyKey, "user", labeledUserText + attachmentBreadcrumb, { dbBinding: config.dbBinding });
     await appendHistory(env, historyKey, "assistant", responseText, { dbBinding: config.dbBinding });
   } catch (err) {
     console.error("[handleChatMessage] history persist error:", err.message);
@@ -342,6 +380,7 @@ export async function handleChatMessage(request, env, ctx, config) {
     channel_slug,
     trigger_type,
     reply_to,
+    attachments,
   } = payload || {};
 
   if (!user_id || !msgBody || !channel_slug) {
@@ -351,9 +390,15 @@ export async function handleChatMessage(request, env, ctx, config) {
   const historyKey = `nexus:${user_id}`;
 
   // ---- 5. Strip @mention tokens --------------------------------------------
-  const userText = stripMention(msgBody);
+  // An empty body is fine when the user attached files (drag-and-drop +
+  // @mention, no caption). Fall through to the LLM with a placeholder.
+  let userText = stripMention(msgBody);
+  const hasAttachments = Array.isArray(attachments) && attachments.length > 0;
   if (!userText) {
-    return json({ success: false, error: "Empty message after stripping mention" }, 400);
+    if (!hasAttachments) {
+      return json({ success: false, error: "Empty message after stripping mention" }, 400);
+    }
+    userText = "(no caption -- please read the attached files)";
   }
 
   // ---- 6. !cmd dispatch (BEFORE the ambient gate) --------------------------
@@ -468,6 +513,7 @@ export async function handleChatMessage(request, env, ctx, config) {
     userText,
     labeledUserText,
     historyKey,
+    attachments,
     config,
   }));
 
