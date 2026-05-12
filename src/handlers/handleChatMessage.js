@@ -40,21 +40,32 @@ import { postApprovalCard } from "../lib/hitl.js";
 import { asEmbedCard, buildCommandTitle, colorForBot } from "../lib/embedCard.js";
 import { buildAttachmentContentBlocks } from "../lib/attachments.js";
 
-// Nexus @mention token pattern (e.g. @robert, @bot_robert)
-const MENTION_RE = /@\S+/g;
-
 // Foundation command verbs built per-request (need env + user context)
 const FOUNDATION_VERBS = new Set(["remember", "forget", "facts", "clear", "status"]);
 
 /**
- * Strip @mention tokens from the message body.
+ * Strip only this bot's own @mention token(s) from the message body.
+ * Preserves all other @tokens (e.g. @me, @channel, @colleague) so the
+ * LLM receives the user's full intent without mangling.
+ *
+ * Matches the bot's canonical id form (@courtney) and the bot_ prefixed
+ * form (@bot_courtney) so both trigger styles are cleaned up.
  *
  * @param {string} body
+ * @param {string} botName  - e.g. "courtney", "robert"
  * @returns {string}
  */
-function stripMention(body) {
+function stripMention(body, botName) {
   if (typeof body !== "string") return "";
-  return body.replace(MENTION_RE, "").trim();
+  if (!botName) {
+    // Legacy fallback: strip everything (old behavior). Should not happen
+    // when callers pass config.botName, but kept for safety.
+    return body.replace(/@\S+/g, "").trim();
+  }
+  const escaped = botName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Match @courtney and @bot_courtney (case-insensitive, word-boundary after)
+  const re = new RegExp(`@(?:bot_)?${escaped}\\b`, "gi");
+  return body.replace(re, "").trim();
 }
 
 /**
@@ -399,9 +410,11 @@ export async function handleChatMessage(request, env, ctx, config) {
   const historyKey = `nexus:${user_id}`;
 
   // ---- 5. Strip @mention tokens --------------------------------------------
+  // Strip only the bot's own @mention tokens. All other @tokens (e.g. @me,
+  // @channel, @colleague) are preserved so the LLM sees the full user intent.
   // An empty body is fine when the user attached files (drag-and-drop +
   // @mention, no caption). Fall through to the LLM with a placeholder.
-  let userText = stripMention(msgBody || "");
+  let userText = stripMention(msgBody || "", config.botName);
   if (!userText) {
     if (!hasAttachments) {
       return json({ success: false, error: "Empty message after stripping mention" }, 400);
