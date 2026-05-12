@@ -44,3 +44,9 @@ export {
   DEFAULT_COMMAND_COLOR,
 } from "./lib/embedCard.js";
 export { buildAttachmentContentBlocks } from "./lib/attachments.js";
+export {
+  findUsersVoiceChannel,
+  postHmacSigned,
+  makeJoinCommand,
+  makeLeaveCommand,
+} from "./lib/voiceJoin.js";
