@@ -239,7 +239,11 @@ async function runLlmPipeline({
     history.push({ role: "user", content: userContent });
 
     const factsBlock = await buildFactsBlock(env, user_id, { dbBinding: config.dbBinding });
-    const systemPromptWithFacts = factsBlock ? systemPrompt + factsBlock : systemPrompt;
+    const NEXUS_MENTION_RULE =
+      "\n\nTo @-mention a user back in a reply, write @DisplayName (exactly as it appears in the" +
+      " message prefix before the colon, e.g. if the message starts with `Dirk (uid:abc123): ...`" +
+      " then write @Dirk). Do not invent a user id syntax -- plain @DisplayName is the correct form.";
+    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_MENTION_RULE;
 
     responseText = await callAnthropicWithTools(
       env,
