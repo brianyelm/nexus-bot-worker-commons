@@ -37,6 +37,7 @@ import { rememberFact, forgetFact, listFacts, buildFactsBlock } from "../lib/mem
 import { callAnthropicWithTools } from "../lib/anthropic.js";
 import { postToNexus } from "../lib/nexus.js";
 import { postApprovalCard } from "../lib/hitl.js";
+import { asEmbedCard, buildCommandTitle, colorForBot } from "../lib/embedCard.js";
 
 // Nexus @mention token pattern (e.g. @robert, @bot_robert)
 const MENTION_RE = /@\S+/g;
@@ -148,7 +149,7 @@ function buildFoundationHandlers(env, userId, historyKey, channel_slug, config, 
         .catch(() => 0);
       const enabledKey = `${botName.toUpperCase().replace(/-/g, "_")}_WORKER_ENABLED`;
       await cmdCtx.reply(
-        `**${displayName} -- Status**\nChat history: ${histDepth} turns\nWorker: ${botName}-worker (CF Workers)\nEnabled: ${env[enabledKey] || "unknown"}`
+        `Chat history: ${histDepth} turns\nWorker: ${botName}-worker (CF Workers)\nEnabled: ${env[enabledKey] || "unknown"}`
       );
     },
   };
@@ -350,13 +351,45 @@ export async function handleChatMessage(request, env, ctx, config) {
 
     const handler = mergedHandlers[verb];
     if (handler) {
+      // Resolve the bot's default command-card color + canonical title once
+      // per dispatch so per-reply wrapping is cheap.
+      const botDisplayName = config.persona?.displayName || config.botName || "Bot";
+      const defaultColor = config.commandColor || colorForBot(config.botName);
+      // Per-bot verb -> title override map (config.commandTitles) lets each
+      // worker spell its help/status cards naturally ("SOC Commands" instead
+      // of just "Help") while every other verb falls back to the canonical
+      // "<Bot> -- <Verb>" shape.
+      const titleOverride = config.commandTitles && config.commandTitles[verb];
+      const defaultTitle = titleOverride
+        ? `${botDisplayName} -- ${titleOverride}`
+        : buildCommandTitle(botDisplayName, verb);
+
       let replied = false;
+      /**
+       * Wrap a command reply in the Nexus rich-embed card markup unless the
+       * caller opts out. Handlers can override the title and color per-call
+       * (useful for severity-tinted !status output) or pass embed:false to
+       * emit a raw chat reply that bypasses the visual treatment.
+       *
+       * Signature: reply(text, options?)
+       *   options.title  string  override the auto-derived title
+       *   options.color  string  override the bot's default color (hex)
+       *   options.embed  boolean false => skip wrapper, post as-is
+       */
       const cmdCtx = {
         verb,
         args,
-        reply: async (text) => {
+        reply: async (text, options = {}) => {
           replied = true;
-          await postToNexus(env, channel_slug, text, nexusOptions);
+          const useEmbed = options.embed !== false;
+          const finalText = useEmbed
+            ? asEmbedCard(
+                options.title || defaultTitle,
+                String(text ?? ""),
+                options.color || defaultColor,
+              )
+            : String(text ?? "");
+          await postToNexus(env, channel_slug, finalText, nexusOptions);
         },
         user_id,
         display_name,
@@ -368,7 +401,15 @@ export async function handleChatMessage(request, env, ctx, config) {
       } catch (err) {
         console.error(`[handleChatMessage] command error !${verb}:`, err.message);
         if (!replied) {
-          await postToNexus(env, channel_slug, `Command error: ${err.message}`, nexusOptions).catch(() => {});
+          // Surface command errors as a wrapped card too so the visual
+          // contract holds even when a handler throws.
+          const errBody = `Command error: ${err.message}`;
+          await postToNexus(
+            env,
+            channel_slug,
+            asEmbedCard(`${botDisplayName} -- Error`, errBody, defaultColor),
+            nexusOptions,
+          ).catch(() => {});
         }
       }
       return json({ success: true });

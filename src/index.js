@@ -34,3 +34,11 @@ export { rememberFact, forgetFact, listFacts, buildFactsBlock } from "./lib/memo
 export { postToNexus, attachButtons, sendNexusHeartbeat } from "./lib/nexus.js";
 export { postApprovalCard, processButtonClick } from "./lib/hitl.js";
 export { makeShouldRespond } from "./lib/triggers.js";
+export {
+  asEmbedCard,
+  prettifyVerb,
+  buildCommandTitle,
+  colorForBot,
+  BOT_COMMAND_COLORS,
+  DEFAULT_COMMAND_COLOR,
+} from "./lib/embedCard.js";
