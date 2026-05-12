@@ -154,6 +154,51 @@ export async function attachButtons(env, messageId, buttons, options = {}) {
 }
 
 /**
+ * Edit a Nexus message previously posted by this bot.
+ * Uses PATCH /api/bot/messages/:id (Bearer auth, authorship enforced
+ * server-side -- bot can only edit its own messages).
+ *
+ * Best-effort: returns null on failure so callers in click-handlers do
+ * not crash an HTTP response chain when Nexus is briefly unreachable.
+ *
+ * @param {object} env
+ * @param {string} messageId
+ * @param {string} body - new markdown body
+ * @param {object} [options]
+ * @param {string} [options.nexusKeyEnvVar]
+ * @returns {Promise<object|null>}
+ */
+export async function editNexusMessage(env, messageId, body, options = {}) {
+  const apiKey = resolveNexusKey(env, options);
+  if (!apiKey || !env.NEXUS_BASE_URL) return null;
+  if (!messageId || typeof body !== "string" || !body.trim()) return null;
+  try {
+    const res = await fetch(
+      `${env.NEXUS_BASE_URL}/api/bot/messages/${encodeURIComponent(messageId)}`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ body, body_format: "markdown" }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      },
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.warn(`[nexus] editNexusMessage(${messageId}) -> ${res.status}: ${text}`);
+      return null;
+    }
+    const j = await res.json().catch(() => ({}));
+    return j?.data || null;
+  } catch (err) {
+    console.warn(`[nexus] editNexusMessage(${messageId}) failed:`, err.message);
+    return null;
+  }
+}
+
+/**
  * Send a "<bot> is typing..." indicator to a Nexus channel.
  *
  * Hits POST /api/bot/typing (X-API-Key auth, same identity model as

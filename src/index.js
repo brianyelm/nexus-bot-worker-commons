@@ -31,11 +31,12 @@ export { verifyNexusSignature, timingSafeEqual } from "./lib/callbackSign.js";
 export { parseCommand } from "./lib/commandParser.js";
 export { loadHistory, appendHistory } from "./lib/history.js";
 export { rememberFact, forgetFact, listFacts, buildFactsBlock } from "./lib/memory.js";
-export { postToNexus, attachButtons, sendNexusHeartbeat, sendTyping } from "./lib/nexus.js";
+export { postToNexus, attachButtons, editNexusMessage, sendNexusHeartbeat, sendTyping } from "./lib/nexus.js";
 export { postApprovalCard, processButtonClick } from "./lib/hitl.js";
 export { makeShouldRespond } from "./lib/triggers.js";
 export {
   asEmbedCard,
+  asRichEmbedCard,
   prettifyVerb,
   buildCommandTitle,
   colorForBot,

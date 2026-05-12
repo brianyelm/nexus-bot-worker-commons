@@ -90,6 +90,81 @@ export function asEmbedCard(title, body, color = DEFAULT_COMMAND_COLOR) {
 }
 
 /**
+ * Build a rich embed card with Discord-style structured fields and an
+ * optional footer line. The output is a single string in the bracketed
+ * markup the Nexus UI's EmbedMessageBody parser recognises.
+ *
+ * Output shape:
+ *   [embed color:#hex title:Title]
+ *   [field name:From]
+ *   <multi-line value preserved as-is>
+ *   [/field]
+ *   [field name:Subject]
+ *   ...
+ *   [/field]
+ *   [footer]
+ *   <footer text>
+ *   [/footer]
+ *   [/embed]
+ *
+ * Any omitted argument is skipped (no empty blocks emitted). Field values
+ * may span multiple lines; the parser preserves whitespace verbatim. The
+ * caller is responsible for trimming each field value to a sensible
+ * length (the Nexus message-body cap is 8000 chars total).
+ *
+ * Backward compatibility: when called with no fields and no footer the
+ * output collapses to the same shape `asEmbedCard` produces, so existing
+ * UI behaviour is preserved for callers who do not need the new layout.
+ *
+ * @param {{
+ *   title?: string,
+ *   color?: string,
+ *   body?: string,
+ *   fields?: Array<{name: string, value: string}>,
+ *   footer?: string,
+ * }} opts
+ * @returns {string}
+ */
+export function asRichEmbedCard({ title = "", color = DEFAULT_COMMAND_COLOR, body = "", fields = [], footer = "" } = {}) {
+  const safeTitle = typeof title === "string" ? title.trim() : "";
+  const safeColor = typeof color === "string" && /^#[0-9a-fA-F]{3,6}$/.test(color)
+    ? color
+    : DEFAULT_COMMAND_COLOR;
+  const lines = [`[embed color:${safeColor} title:${safeTitle}]`];
+
+  // Optional intro body (above field blocks). Stripped of trailing newlines
+  // so the field section starts cleanly underneath.
+  if (typeof body === "string" && body.trim().length > 0) {
+    lines.push(body.replace(/\n+$/, ""));
+  }
+
+  // Field blocks. Each becomes a Discord-style label-above-value pair in
+  // the rendered card. We coerce non-string values to strings and skip
+  // entries that are missing a name, since an unlabelled field is useless.
+  if (Array.isArray(fields)) {
+    for (const f of fields) {
+      if (!f || typeof f !== "object") continue;
+      const name = typeof f.name === "string" ? f.name.trim() : "";
+      if (!name) continue;
+      const rawValue = f.value === undefined || f.value === null ? "" : String(f.value);
+      const value = rawValue.replace(/\n+$/, "");
+      lines.push(`[field name:${name}]`);
+      lines.push(value);
+      lines.push(`[/field]`);
+    }
+  }
+
+  if (typeof footer === "string" && footer.trim().length > 0) {
+    lines.push(`[footer]`);
+    lines.push(footer.replace(/\n+$/, ""));
+    lines.push(`[/footer]`);
+  }
+
+  lines.push(`[/embed]`);
+  return lines.join("\n");
+}
+
+/**
  * Capitalize a single command verb for use in an auto-derived card title.
  * "help" -> "Help", "mitre" -> "Mitre", "playbooks" -> "Playbooks".
  *
