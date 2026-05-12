@@ -285,7 +285,12 @@ export async function handleChatMessage(request, env, ctx, config) {
   }
 
   // ---- 2. Verify HMAC ------------------------------------------------------
-  const secret = env[config.nexusKeyEnvVar];
+  // Inbound HMAC secret comes from callbackSecretEnvVar when set (modern
+  // two-secret pattern: callbackSecret inbound + nexusKey outbound), or
+  // falls back to nexusKeyEnvVar (legacy single-secret pattern used by
+  // robert-worker -- ROBERT_NEXUS_KEY does double duty there).
+  const inboundSecretEnvVar = config.callbackSecretEnvVar || config.nexusKeyEnvVar;
+  const secret = env[inboundSecretEnvVar];
   const authorized = await verifyNexusSignature(secret, rawBody, request.headers);
   if (!authorized) {
     return new Response("Unauthorized", { status: 401 });
