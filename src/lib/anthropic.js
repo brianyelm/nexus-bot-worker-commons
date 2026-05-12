@@ -188,6 +188,11 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
  * @param {object} handlers - { [toolName]: async (input, env, ctx) => any }
  * @param {object} [ctx] - Extra context passed to handlers
  * @param {object} [options]
+ * @param {(turnIndex: number) => (void|Promise<void>)} [options.onTurnStart] - Hook
+ *   called immediately before each Anthropic POST. turnIndex starts at 0 for
+ *   the initial call, then increments per tool-loop iteration. Used by
+ *   handleChatMessage to re-arm the Nexus typing indicator across long
+ *   tool loops (the indicator has a 90s TTL on the Nexus DO).
  * @returns {Promise<string>} Final assistant text
  */
 export async function callAnthropicWithTools(env, systemPrompt, messages, tools, handlers, ctx = {}, options = {}) {
@@ -214,6 +219,14 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
   let workingMessages = [...messages];
   let iterations = 0;
   let response;
+  let turnIndex = 0;
+
+  const onTurnStart = typeof options.onTurnStart === "function" ? options.onTurnStart : null;
+  if (onTurnStart) {
+    try { await onTurnStart(turnIndex); } catch (err) {
+      console.warn("[anthropic] onTurnStart hook failed:", err.message);
+    }
+  }
 
   response = await _post(apiKey, {
     ...baseParams,
@@ -257,6 +270,13 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
     }
 
     workingMessages.push({ role: "user", content: toolResults });
+
+    turnIndex++;
+    if (onTurnStart) {
+      try { await onTurnStart(turnIndex); } catch (err) {
+        console.warn("[anthropic] onTurnStart hook failed:", err.message);
+      }
+    }
 
     response = await _post(apiKey, {
       ...baseParams,

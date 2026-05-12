@@ -35,7 +35,7 @@ import { parseCommand } from "../lib/commandParser.js";
 import { loadHistory, appendHistory } from "../lib/history.js";
 import { rememberFact, forgetFact, listFacts, buildFactsBlock } from "../lib/memory.js";
 import { callAnthropicWithTools } from "../lib/anthropic.js";
-import { postToNexus } from "../lib/nexus.js";
+import { postToNexus, sendTyping } from "../lib/nexus.js";
 import { postApprovalCard } from "../lib/hitl.js";
 import { asEmbedCard, buildCommandTitle, colorForBot } from "../lib/embedCard.js";
 
@@ -181,6 +181,17 @@ async function runLlmPipeline({
   let responseText;
   let history;
 
+  // "<bot> is typing..." indicator. Nexus dispatch already fires a
+  // typing-start before invoking us, but the dispatch-side indicator
+  // expires after 90s on the DO. For tool loops that exceed that window
+  // (e.g. Maxwell running an AR query through Xero with retries) we keep
+  // it alive by re-arming the indicator before every Anthropic call via
+  // the onTurnStart hook, and clear it in finally below so users never
+  // see a stale "typing" trail after the bot has actually returned. The
+  // Nexus typing route resolves the bot identity from the Bearer key, so
+  // commons does not need to know the bot user id here.
+  await sendTyping(env, channel_slug, "start", nexusOptions);
+
   try {
     history = await loadHistory(env, historyKey, { dbBinding: config.dbBinding });
     history.push({ role: "user", content: labeledUserText });
@@ -195,6 +206,16 @@ async function runLlmPipeline({
       config.tools.definitions || [],
       config.tools.handlers || {},
       { user_id, display_name, channel_slug },
+      {
+        // Re-arm the typing indicator before every Anthropic POST so
+        // long tool loops (>90s total) don't lose the indicator on the
+        // DO TTL. The initial start is sent above; this catches turns
+        // 2+. Best-effort: sendTyping never throws.
+        onTurnStart: (turnIndex) => {
+          if (turnIndex === 0) return; // already armed above
+          return sendTyping(env, channel_slug, "start", nexusOptions);
+        },
+      },
     );
   } catch (err) {
     console.error("[handleChatMessage] pipeline error:", err.message);
@@ -207,6 +228,14 @@ async function runLlmPipeline({
       );
     } catch { /* ignore */ }
     return;
+  } finally {
+    // Always clear the typing indicator. The ChatRoom DO also auto-
+    // clears on bot message arrival (so the user never sees "typing"
+    // beneath the just-posted reply), but an explicit stop covers
+    // error paths where no message is ever posted.
+    try {
+      await sendTyping(env, channel_slug, "stop", nexusOptions);
+    } catch { /* ignore */ }
   }
 
   // ---- <action> block detection --------------------------------------------

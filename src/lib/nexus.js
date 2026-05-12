@@ -5,12 +5,14 @@
 //   postToNexus(env, slug, content, [options])      - POST markdown to a channel
 //   attachButtons(env, messageId, buttons, [options]) - attach interactive buttons
 //   sendNexusHeartbeat(env, [meta], [options])       - heartbeat ping
+//   sendTyping(env, slug, action, [options])        - "<bot> is typing..." indicator
 //
 // options:
 //   nexusKeyEnvVar     {string} - env var name for the API key (default: inferred below)
 //   callbackSecretEnvVar {string} - env var name for button callback_secret
 //
-// Auth: X-API-Key: <env[nexusKeyEnvVar]> on every request.
+// Auth: X-API-Key: <env[nexusKeyEnvVar]> on every request (or Bearer
+// where the Nexus route requires it; sendTyping uses Bearer).
 // Errors are swallowed with console.warn so a Nexus outage never crashes a
 // cron job or chat handler. Callers receive null on failure.
 //
@@ -148,6 +150,57 @@ export async function attachButtons(env, messageId, buttons, options = {}) {
   } catch (err) {
     console.warn(`[nexus] attachButtons(${messageId}) failed:`, err.message);
     return null;
+  }
+}
+
+/**
+ * Send a "<bot> is typing..." indicator to a Nexus channel.
+ *
+ * Hits POST /api/bot/channels/:slug/typing (Bearer auth) which fans the
+ * frame out through the channel's ChatRoom DO. The DO sets a 90s TTL on
+ * each start; callers in long-running tool loops should re-send "start"
+ * periodically (every ~60s) to keep the indicator alive. "stop" clears it
+ * immediately (the auto-clear on bot message arrival also handles this,
+ * so an explicit stop is mostly insurance for error paths).
+ *
+ * Best-effort: never throws. A Nexus outage or auth misconfig must not
+ * crash a chat handler or take down a tool loop.
+ *
+ * @param {object} env
+ * @param {string} slug - Nexus channel slug
+ * @param {"start"|"stop"} action
+ * @param {object} [options]
+ * @param {string} [options.nexusKeyEnvVar] - env var name holding the API key
+ * @returns {Promise<void>}
+ */
+export async function sendTyping(env, slug, action, options = {}) {
+  const apiKey = resolveNexusKey(env, options);
+  if (!apiKey || !env.NEXUS_BASE_URL) return;
+  if (action !== "start" && action !== "stop") return;
+  if (!slug || typeof slug !== "string") return;
+  try {
+    const res = await fetch(
+      `${env.NEXUS_BASE_URL}/api/bot/channels/${encodeURIComponent(slug)}/typing`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          // Channel-gated typing route is Bearer-only (see Nexus
+          // worker/src/lib/bot-auth.js). The same per-bot key works for
+          // both X-API-Key (legacy /api/bot/messages) and Bearer (new
+          // channel-gated routes), so reuse the resolved key here.
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ state: action }),
+        signal: AbortSignal.timeout(TIMEOUT_MS),
+      },
+    );
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.warn(`[nexus] sendTyping(${slug}, ${action}) -> ${res.status}: ${text}`);
+    }
+  } catch (err) {
+    console.warn(`[nexus] sendTyping(${slug}, ${action}) failed:`, err.message);
   }
 }
 
