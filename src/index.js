@@ -45,7 +45,6 @@ export {
 } from "./lib/embedCard.js";
 export { buildAttachmentContentBlocks } from "./lib/attachments.js";
 export {
-  findUsersVoiceChannel,
   postHmacSigned,
   makeJoinCommand,
   makeLeaveCommand,
