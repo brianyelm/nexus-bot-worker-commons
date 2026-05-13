@@ -207,3 +207,184 @@ export function colorForBot(botName) {
   const key = botName.toLowerCase();
   return BOT_COMMAND_COLORS[key] || DEFAULT_COMMAND_COLOR;
 }
+
+/**
+ * Parse a raw command reply string into structured sections for rich embed
+ * rendering. Detects separator-style section headers (lines of 8+ `=` or `-`
+ * chars, or lines matching `-- <Title> --` / `** <Title> **` patterns) and
+ * splits the body into a leading prose block plus named field sections.
+ *
+ * Returns an array of sections:
+ *   [{ name: string|null, value: string }, ...]
+ *
+ * When only one section is found (no separators detected), the array has a
+ * single entry with name=null and value=the full body. Callers render this as
+ * a plain embed body rather than fields[].
+ *
+ * Rules:
+ * - Separator lines (8+ `=` or 8+ `-`) signal a new section. The line
+ *   immediately following the separator becomes the section name if it is
+ *   short (<= 80 chars) and not itself a separator; otherwise the section is
+ *   unnamed (name=null).
+ * - `-- Title --` and `** Title **` lines are treated as named section headers
+ *   inline (no preceding separator line required).
+ * - Empty leading/trailing whitespace is trimmed from each section value.
+ * - Sections whose value collapses to empty string after trim are discarded.
+ * - NO `]` characters are permitted in section names (Nexus embed parser
+ *   terminates attribute parsing on `]`). Any `]` in a candidate name is
+ *   replaced with `)`.
+ *
+ * @param {string} raw  - raw reply text from a command handler
+ * @returns {Array<{name: string|null, value: string}>}
+ */
+export function parseMultiSection(raw) {
+  if (typeof raw !== "string" || !raw.trim()) {
+    return [{ name: null, value: "" }];
+  }
+
+  // Regex patterns for separator and inline-header detection
+  const HARD_SEP_RE = /^[=\-]{8,}\s*$/;
+  const DASH_HEADER_RE = /^--\s+(.+?)\s+--\s*$/;
+  const STAR_HEADER_RE = /^\*\*\s*(.+?)\s*\*\*\s*$/;
+
+  const lines = raw.split("\n");
+  const sections = [];
+  let currentName = null;
+  let currentLines = [];
+  let i = 0;
+
+  /**
+   * Flush accumulated lines into sections[].
+   * @param {string|null} name
+   * @param {string[]} acc
+   */
+  function flush(name, acc) {
+    const value = acc.join("\n").replace(/^\s+|\s+$/g, "");
+    if (value.length > 0) {
+      // Sanitize name: no ] chars (Nexus embed parser terminates on ])
+      const safeName = name ? name.replace(/]/g, ")").trim() : null;
+      sections.push({ name: safeName, value });
+    }
+  }
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    // Hard separator (=====... or -----...)
+    if (HARD_SEP_RE.test(line)) {
+      // Flush what we have so far
+      flush(currentName, currentLines);
+      currentName = null;
+      currentLines = [];
+      // Peek at next non-empty line as a potential section name
+      let j = i + 1;
+      while (j < lines.length && lines[j].trim() === "") j++;
+      if (j < lines.length && !HARD_SEP_RE.test(lines[j]) && lines[j].trim().length <= 80) {
+        currentName = lines[j].trim();
+        i = j + 1;
+      } else {
+        i++;
+      }
+      continue;
+    }
+
+    // Inline dash header: -- Title --
+    const dashMatch = line.match(DASH_HEADER_RE);
+    if (dashMatch) {
+      flush(currentName, currentLines);
+      currentName = dashMatch[1].trim();
+      currentLines = [];
+      i++;
+      continue;
+    }
+
+    // Inline bold header: **Title** (only when it is the entire line, not
+    // inside prose -- guards against bold text mid-paragraph being promoted)
+    const starMatch = line.match(STAR_HEADER_RE);
+    if (starMatch) {
+      // Only promote to a section header when the candidate title contains
+      // at least one word and the current section body is non-empty (so we
+      // are clearly starting a new logical block). If we are at the very
+      // start of the text (no body yet) we treat it as a section name only
+      // when a hard sep or dash-header precedes it -- otherwise it is the
+      // embed title and we keep it as body text.
+      const candidate = starMatch[1].trim();
+      const hasAccum = currentLines.some(l => l.trim().length > 0);
+      if (hasAccum) {
+        flush(currentName, currentLines);
+        currentName = candidate;
+        currentLines = [];
+        i++;
+        continue;
+      }
+    }
+
+    currentLines.push(line);
+    i++;
+  }
+
+  // Flush final section
+  flush(currentName, currentLines);
+
+  // If no sections were found (all flush calls produced empty values),
+  // return the raw text as a single unnamed section.
+  if (sections.length === 0) {
+    return [{ name: null, value: raw.trim() }];
+  }
+
+  return sections;
+}
+
+/**
+ * Normalise raw command output and wrap it in the richest embed format the
+ * content supports.
+ *
+ * - Single section (no separators) -> asEmbedCard (body only, no fields).
+ * - Multiple sections -> asRichEmbedCard with fields[].
+ * - Always appends a [time:UNIX_MS] footer for the TZ-aware timestamp pill.
+ *
+ * The title is the pre-built card title (bot display name + verb) passed in
+ * by the caller. Color is the bot's canonical command color.
+ *
+ * @param {string} title   - card title (no `]` chars)
+ * @param {string} rawText - raw reply text from a command handler
+ * @param {string} color   - hex color for the left border
+ * @returns {string}       - Nexus embed markup string
+ */
+export function wrapCommandReply(title, rawText, color) {
+  const safeColor = color || DEFAULT_COMMAND_COLOR;
+  const footer = `[time:${Date.now()}]`;
+
+  // Collapse 3+ consecutive blank lines down to 2 and strip trailing whitespace.
+  const normalised = (typeof rawText === "string" ? rawText : String(rawText ?? ""))
+    .replace(/[ \t]+$/gm, "")
+    .replace(/\n{3,}/g, "\n\n");
+
+  const sections = parseMultiSection(normalised);
+
+  if (sections.length <= 1) {
+    // Single section -- use the simpler format (body + footer, no fields).
+    const body = sections[0]?.value ?? normalised.trim();
+    return asRichEmbedCard({ title, color: safeColor, body, footer });
+  }
+
+  // Multi-section. The first section may be unnamed (leading prose) or named.
+  // Separate the leading prose (unnamed first section) from named field sections.
+  let body = "";
+  const fields = [];
+
+  for (const section of sections) {
+    if (!section.name && !body) {
+      // Leading prose block
+      body = section.value;
+    } else {
+      fields.push({
+        name: section.name || "(continued)",
+        value: section.value,
+        inline: false,
+      });
+    }
+  }
+
+  return asRichEmbedCard({ title, color: safeColor, body, fields, footer });
+}

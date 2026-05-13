@@ -37,6 +37,8 @@ export { makeShouldRespond } from "./lib/triggers.js";
 export {
   asEmbedCard,
   asRichEmbedCard,
+  parseMultiSection,
+  wrapCommandReply,
   prettifyVerb,
   buildCommandTitle,
   colorForBot,

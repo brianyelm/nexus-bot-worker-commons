@@ -37,7 +37,7 @@ import { rememberFact, forgetFact, listFacts, buildFactsBlock } from "../lib/mem
 import { callAnthropicWithTools } from "../lib/anthropic.js";
 import { postToNexus, sendTyping } from "../lib/nexus.js";
 import { postApprovalCard } from "../lib/hitl.js";
-import { asEmbedCard, buildCommandTitle, colorForBot } from "../lib/embedCard.js";
+import { asEmbedCard, wrapCommandReply, buildCommandTitle, colorForBot } from "../lib/embedCard.js";
 import { buildAttachmentContentBlocks } from "../lib/attachments.js";
 
 // Foundation command verbs built per-request (need env + user context)
@@ -465,10 +465,15 @@ export async function handleChatMessage(request, env, ctx, config) {
 
       let replied = false;
       /**
-       * Wrap a command reply in the Nexus rich-embed card markup unless the
-       * caller opts out. Handlers can override the title and color per-call
-       * (useful for severity-tinted !status output) or pass embed:false to
-       * emit a raw chat reply that bypasses the visual treatment.
+       * Wrap a command reply in a Nexus rich-embed card unless the caller opts
+       * out. Multi-section replies (separated by =====/-----  or -- Title --
+       * lines) are parsed into fields[]; single-section replies go into body.
+       * A [time:UNIX_MS] footer is appended on every embed for the TZ-aware
+       * timestamp pill.
+       *
+       * Handlers can override the title and color per-call (useful for
+       * severity-tinted !status output) or pass embed:false to emit a raw chat
+       * reply that bypasses the visual treatment entirely.
        *
        * Signature: reply(text, options?)
        *   options.title  string  override the auto-derived title
@@ -482,7 +487,7 @@ export async function handleChatMessage(request, env, ctx, config) {
           replied = true;
           const useEmbed = options.embed !== false;
           const finalText = useEmbed
-            ? asEmbedCard(
+            ? wrapCommandReply(
                 options.title || defaultTitle,
                 String(text ?? ""),
                 options.color || defaultColor,
@@ -509,13 +514,13 @@ export async function handleChatMessage(request, env, ctx, config) {
           } catch (err) {
             console.error(`[handleChatMessage] command error !${verb}:`, err.message);
             if (!replied) {
-              // Surface command errors as a wrapped card too so the visual
+              // Surface command errors as a wrapped card so the visual
               // contract holds even when a handler throws.
               const errBody = `Command error: ${err.message}`;
               await postToNexus(
                 env,
                 channel_slug,
-                asEmbedCard(`${botDisplayName} -- Error`, errBody, defaultColor),
+                wrapCommandReply(`${botDisplayName} -- Error`, errBody, defaultColor),
                 nexusOptions,
               ).catch(() => {});
             }
