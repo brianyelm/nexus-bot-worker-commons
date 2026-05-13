@@ -46,7 +46,7 @@ export async function loadHistory(env, historyKey, options = {}) {
   try {
     const result = await db
       .prepare(
-        "SELECT role, content FROM chat_history WHERE history_key = ? ORDER BY created_at DESC LIMIT ?",
+        "SELECT role, content FROM chat_history WHERE history_key = ? ORDER BY created_at DESC, id DESC LIMIT ?",
       )
       .bind(historyKey, maxTurns)
       .all();
