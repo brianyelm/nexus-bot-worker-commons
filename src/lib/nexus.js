@@ -24,7 +24,27 @@
 //
 // NOTE: handleChatMessage passes options automatically from config.
 // Direct callers (cron jobs) should pass { nexusKeyEnvVar: "BOT_NEXUS_KEY" }.
+//
+// Fleet error surfacing: attachButtons and editNexusMessage call
+// reportFleetError on failure. postToNexus, sendTyping, sendNexusHeartbeat,
+// and pingBotPresence do NOT -- postToNexus would recurse, the typing/
+// heartbeat/presence ops are high-frequency ambient calls whose failures
+// are expected noise during brief outages and must stay silent.
 // =============================================================================
+
+// Lazy import to avoid circular dependency: fleetError imports postToNexus,
+// so we must not import at module load time (CF Workers module-scope I/O ban
+// and circular dep risk). We inline a dynamic import wrapper instead.
+// Because CF Workers are module workers, top-level dynamic import is fine
+// as long as it happens inside a function body (per-request), not at parse time.
+let _reportFleetError = null;
+async function _getReportFleetError() {
+  if (!_reportFleetError) {
+    const mod = await import("./fleetError.js");
+    _reportFleetError = mod.reportFleetError;
+  }
+  return _reportFleetError;
+}
 
 const TIMEOUT_MS = 8000;
 
@@ -186,6 +206,11 @@ export async function attachButtons(env, messageId, buttons, options = {}) {
     return result?.data || null;
   } catch (err) {
     console.warn(`[nexus] attachButtons(${messageId}) failed:`, err.message);
+    _getReportFleetError().then(fn => fn(env, {
+      op: "attachButtons",
+      msg: err.message,
+      ctx: { messageId, buttonCount: Array.isArray(buttons) ? buttons.length : null },
+    }, options)).catch(() => {});
     return null;
   }
 }
@@ -225,6 +250,11 @@ export async function editNexusMessage(env, messageId, body, options = {}) {
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       console.warn(`[nexus] editNexusMessage(${messageId}) -> ${res.status}: ${text}`);
+      _getReportFleetError().then(fn => fn(env, {
+        op: "editNexusMessage",
+        msg: `HTTP ${res.status}: ${text.slice(0, 120)}`,
+        ctx: { messageId },
+      }, options)).catch(() => {});
       return null;
     }
     // Stamp presence fire-and-forget. Do not await.
@@ -233,6 +263,11 @@ export async function editNexusMessage(env, messageId, body, options = {}) {
     return j?.data || null;
   } catch (err) {
     console.warn(`[nexus] editNexusMessage(${messageId}) failed:`, err.message);
+    _getReportFleetError().then(fn => fn(env, {
+      op: "editNexusMessage",
+      msg: err.message,
+      ctx: { messageId },
+    }, options)).catch(() => {});
     return null;
   }
 }

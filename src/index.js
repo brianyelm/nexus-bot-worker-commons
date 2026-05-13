@@ -32,6 +32,7 @@ export { parseCommand } from "./lib/commandParser.js";
 export { loadHistory, appendHistory } from "./lib/history.js";
 export { rememberFact, forgetFact, listFacts, buildFactsBlock } from "./lib/memory.js";
 export { postToNexus, attachButtons, editNexusMessage, sendNexusHeartbeat, sendTyping, pingBotPresence } from "./lib/nexus.js";
+export { reportFleetError } from "./lib/fleetError.js";
 export { postApprovalCard, processButtonClick } from "./lib/hitl.js";
 export { makeShouldRespond } from "./lib/triggers.js";
 export {
