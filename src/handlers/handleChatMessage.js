@@ -495,23 +495,34 @@ export async function handleChatMessage(request, env, ctx, config) {
         channel_slug,
         env,
       };
-      try {
-        await handler(cmdCtx);
-      } catch (err) {
-        console.error(`[handleChatMessage] command error !${verb}:`, err.message);
-        if (!replied) {
-          // Surface command errors as a wrapped card too so the visual
-          // contract holds even when a handler throws.
-          const errBody = `Command error: ${err.message}`;
-          await postToNexus(
-            env,
-            channel_slug,
-            asEmbedCard(`${botDisplayName} -- Error`, errBody, defaultColor),
-            nexusOptions,
-          ).catch(() => {});
-        }
-      }
-      return json({ success: true });
+      // Run the command handler in ctx.waitUntil so the HTTP response
+      // returns 202 immediately. Commands like !device-count call external
+      // APIs (Ninja, Pax8) and post multiple messages -- total wall time
+      // can exceed Nexus's 8-second inbound fetch timeout. Returning 202
+      // before the handler runs prevents Nexus from aborting and
+      // potentially re-dispatching the callback, which was causing
+      // duplicate message storms (bug 2026-05-13).
+      ctx.waitUntil(
+        (async () => {
+          try {
+            await handler(cmdCtx);
+          } catch (err) {
+            console.error(`[handleChatMessage] command error !${verb}:`, err.message);
+            if (!replied) {
+              // Surface command errors as a wrapped card too so the visual
+              // contract holds even when a handler throws.
+              const errBody = `Command error: ${err.message}`;
+              await postToNexus(
+                env,
+                channel_slug,
+                asEmbedCard(`${botDisplayName} -- Error`, errBody, defaultColor),
+                nexusOptions,
+              ).catch(() => {});
+            }
+          }
+        })()
+      );
+      return json({ success: true, queued: true }, 202);
     }
     // Unknown !command falls through to LLM
   }
