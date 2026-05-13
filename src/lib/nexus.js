@@ -134,6 +134,8 @@ export async function postToNexus(env, slug, content, options = {}) {
       { channel_slug: slug, body },
       apiKey,
     );
+    // Stamp presence fire-and-forget so the dot turns green. Do not await.
+    pingBotPresence(env, options).catch(() => {});
     return result?.data || null;
   } catch (err) {
     console.warn(`[nexus] postToNexus(${slug}) failed:`, err.message);
@@ -179,6 +181,8 @@ export async function attachButtons(env, messageId, buttons, options = {}) {
       { buttons: withSecret },
       apiKey,
     );
+    // Stamp presence fire-and-forget. Do not await.
+    pingBotPresence(env, options).catch(() => {});
     return result?.data || null;
   } catch (err) {
     console.warn(`[nexus] attachButtons(${messageId}) failed:`, err.message);
@@ -223,6 +227,8 @@ export async function editNexusMessage(env, messageId, body, options = {}) {
       console.warn(`[nexus] editNexusMessage(${messageId}) -> ${res.status}: ${text}`);
       return null;
     }
+    // Stamp presence fire-and-forget. Do not await.
+    pingBotPresence(env, options).catch(() => {});
     const j = await res.json().catch(() => ({}));
     return j?.data || null;
   } catch (err) {
@@ -283,6 +289,44 @@ export async function sendTyping(env, slug, action, options = {}) {
     }
   } catch (err) {
     console.warn(`[nexus] sendTyping(${slug}, ${action}) failed:`, err.message);
+  }
+}
+
+/**
+ * Stamp this bot's last_seen_at so the presence dot turns green.
+ *
+ * Fire-and-forget: called internally after every postToNexus /
+ * attachButtons / editNexusMessage success. Callers never need to call
+ * this directly, though they may if they have bot activity that doesn't
+ * go through those helpers (e.g. a cron that only reads data).
+ *
+ * Uses the same Bearer auth as attachButtons / editNexusMessage.
+ * Swallows all errors so a Nexus outage never crashes a cron job.
+ *
+ * @param {object} env
+ * @param {object} [options]
+ * @param {string} [options.nexusKeyEnvVar] - env var name holding the API key
+ * @returns {Promise<void>}
+ */
+export async function pingBotPresence(env, options = {}) {
+  const apiKey = resolveNexusKey(env, options);
+  if (!apiKey || !env.NEXUS_BASE_URL) return;
+  try {
+    const res = await fetch(`${env.NEXUS_BASE_URL}/api/bot/me/last-seen`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({}),
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.error(`[nexus] pingBotPresence -> ${res.status}: ${text}`);
+    }
+  } catch (err) {
+    console.error("[nexus] pingBotPresence failed:", err.message);
   }
 }
 
