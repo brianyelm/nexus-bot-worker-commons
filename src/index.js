@@ -38,6 +38,7 @@ export { makeShouldRespond } from "./lib/triggers.js";
 export {
   asEmbedCard,
   asRichEmbedCard,
+  safeEmbedTitle,
   parseMultiSection,
   wrapCommandReply,
   prettifyVerb,

@@ -64,6 +64,38 @@ export const BOT_COMMAND_COLORS = {
 export const DEFAULT_COMMAND_COLOR = "#5b8def";
 
 /**
+ * Sanitize a string for safe use as a Nexus embed title attribute.
+ *
+ * The Nexus EMBED_RE opening tag is parsed by the regex [^\]]+ which stops at
+ * the first literal ] character. Any [ or ] in the title terminates or corrupts
+ * attribute parsing, causing the entire card body and fields to render as raw
+ * markdown verbatim instead of a rich embed.
+ *
+ * This function strips [ and ] characters, replacing them with a space, then
+ * collapses multiple consecutive spaces to one. Call this on any title that may
+ * contain external or user-supplied data (API threat names, ticket subjects,
+ * case names, etc.) before passing it to asEmbedCard or asRichEmbedCard.
+ *
+ * asRichEmbedCard and asEmbedCard both call this internally on every title, so
+ * callers that go through those helpers are already protected. Export is provided
+ * for pre-processing use cases (e.g. logging, debugging) or producers that
+ * build embed markup manually.
+ *
+ * Promoted from courtney-worker/src/jobs/ticket-mirror.js (local copy).
+ * With this promotion, courtney-worker's local safeEmbedTitle can be removed
+ * and replaced with the commons import -- deferred until the next courtney deploy.
+ *
+ * @param {string} str
+ * @returns {string}
+ */
+export function safeEmbedTitle(str) {
+  return String(str ?? "")
+    .replace(/[\[\]]/g, " ")
+    .replace(/  +/g, " ")
+    .trim();
+}
+
+/**
  * Build the embed markup string the Nexus UI renderer recognises.
  * Caller is responsible for choosing the title and color; this helper is
  * format-only and does not consult any per-bot configuration.
@@ -78,7 +110,7 @@ export const DEFAULT_COMMAND_COLOR = "#5b8def";
  * @returns {string}
  */
 export function asEmbedCard(title, body, color = DEFAULT_COMMAND_COLOR) {
-  const safeTitle = typeof title === "string" ? title.trim() : "";
+  const safeTitle = safeEmbedTitle(typeof title === "string" ? title : "");
   const safeBody = typeof body === "string" ? body.replace(/\n+$/, "") : String(body ?? "");
   const safeColor = typeof color === "string" && /^#[0-9a-fA-F]{3,6}$/.test(color)
     ? color
@@ -126,7 +158,7 @@ export function asEmbedCard(title, body, color = DEFAULT_COMMAND_COLOR) {
  * @returns {string}
  */
 export function asRichEmbedCard({ title = "", color = DEFAULT_COMMAND_COLOR, body = "", fields = [], footer = "" } = {}) {
-  const safeTitle = typeof title === "string" ? title.trim() : "";
+  const safeTitle = safeEmbedTitle(typeof title === "string" ? title : "");
   const safeColor = typeof color === "string" && /^#[0-9a-fA-F]{3,6}$/.test(color)
     ? color
     : DEFAULT_COMMAND_COLOR;
