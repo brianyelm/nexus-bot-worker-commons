@@ -56,7 +56,7 @@ function resolveCallbackSecret(env, options = {}) {
 }
 
 /**
- * POST JSON to a Nexus endpoint and return parsed JSON on success.
+ * POST JSON to a Nexus endpoint using X-API-Key auth and return parsed JSON on success.
  * Throws on non-2xx so callers can catch and log.
  *
  * @param {string} url
@@ -70,6 +70,34 @@ async function _post(url, body, apiKey) {
     headers: {
       "Content-Type": "application/json",
       "X-API-Key": apiKey,
+    },
+    body: JSON.stringify(body),
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Nexus POST ${url} -> ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+/**
+ * POST JSON to a Nexus endpoint using Authorization: Bearer auth and return parsed JSON on success.
+ * Used for bot-side component routes (e.g. /api/bot/messages/:id/buttons) which require
+ * Bearer token auth rather than X-API-Key.
+ * Throws on non-2xx so callers can catch and log.
+ *
+ * @param {string} url
+ * @param {object} body
+ * @param {string} apiKey
+ * @returns {Promise<object>}
+ */
+async function _bearerPost(url, body, apiKey) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${apiKey}`,
     },
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -115,7 +143,12 @@ export async function postToNexus(env, slug, content, options = {}) {
 
 /**
  * Attach interactive buttons to a Nexus message.
- * Uses POST /api/messages/:id/buttons.
+ * Uses POST /api/bot/messages/:id/buttons (Bearer auth, bot-side route added 2026-05-10).
+ *
+ * This route requires:
+ *   - Authorization: Bearer <BOT_NEXUS_KEY> (not X-API-Key)
+ *   - The bot must have a bot_channel_permissions row for the message's channel
+ *   - The message must have been authored by the same bot
  *
  * Stamps each button with callback_secret so Nexus can HMAC-sign the dispatch.
  * The receiving handler (buttonClick.js) verifies the resulting X-Nexus-Signature.
@@ -141,8 +174,8 @@ export async function attachButtons(env, messageId, buttons, options = {}) {
   }));
 
   try {
-    const result = await _post(
-      `${env.NEXUS_BASE_URL}/api/messages/${messageId}/buttons`,
+    const result = await _bearerPost(
+      `${env.NEXUS_BASE_URL}/api/bot/messages/${messageId}/buttons`,
       { buttons: withSecret },
       apiKey,
     );
