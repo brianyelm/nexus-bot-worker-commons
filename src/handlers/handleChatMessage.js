@@ -35,7 +35,7 @@ import { parseCommand } from "../lib/commandParser.js";
 import { loadHistory, appendHistory } from "../lib/history.js";
 import { rememberFact, forgetFact, listFacts, buildFactsBlock } from "../lib/memory.js";
 import { callAnthropicWithTools } from "../lib/anthropic.js";
-import { postToNexus, sendTyping } from "../lib/nexus.js";
+import { postToNexus, sendTyping, fetchChannelMessages } from "../lib/nexus.js";
 import { postApprovalCard } from "../lib/hitl.js";
 import { asEmbedCard, wrapCommandReply, buildCommandTitle, colorForBot } from "../lib/embedCard.js";
 import { buildAttachmentContentBlocks } from "../lib/attachments.js";
@@ -245,12 +245,53 @@ async function runLlmPipeline({
       " then write @Dirk). Do not invent a user id syntax -- plain @DisplayName is the correct form.";
     const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_MENTION_RULE;
 
+    const channelHistoryTool = {
+      name: "read_channel_history",
+      description:
+        "Read recent messages from a Nexus channel you have access to. " +
+        "Returns the most recent messages in chronological order with author names and timestamps. " +
+        "Use this to review what was said recently, recall context, or answer questions about channel history.",
+      input_schema: {
+        type: "object",
+        properties: {
+          channel_slug: {
+            type: "string",
+            description:
+              "The channel slug to read from. Defaults to the current channel if omitted.",
+          },
+          limit: {
+            type: "integer",
+            description: "Number of messages to fetch (1-50). Defaults to 10.",
+          },
+        },
+        required: [],
+      },
+    };
+    const channelHistoryHandler = async (input) => {
+      const slug = input?.channel_slug || channel_slug;
+      const limit = Math.min(Math.max(parseInt(input?.limit) || 10, 1), 50);
+      const msgs = await fetchChannelMessages(env, slug, { ...nexusOptions, limit });
+      if (!msgs) return { error: `Could not read messages from #${slug}. Check channel permissions.` };
+      return {
+        channel: slug,
+        count: msgs.length,
+        messages: msgs.map((m) => ({
+          author: m.display_name || m.user_id,
+          body: (m.body || "").slice(0, 500),
+          timestamp: m.created_at,
+        })),
+      };
+    };
+
+    const mergedTools = [...(config.tools.definitions || []), channelHistoryTool];
+    const mergedHandlers = { ...(config.tools.handlers || {}), read_channel_history: channelHistoryHandler };
+
     responseText = await callAnthropicWithTools(
       env,
       systemPromptWithFacts,
       history,
-      config.tools.definitions || [],
-      config.tools.handlers || {},
+      mergedTools,
+      mergedHandlers,
       { user_id, display_name, channel_slug },
       {
         // Re-arm the typing indicator before every Anthropic POST so

@@ -413,6 +413,41 @@ export async function pingBotPresence(env, options = {}) {
 }
 
 /**
+ * Read recent messages from a Nexus channel.
+ * Uses GET /api/bot/channels/:slug/messages (Bearer auth, channel-perm gated).
+ *
+ * @param {object} env
+ * @param {string} slug - channel slug
+ * @param {object} [options]
+ * @param {number} [options.limit] - max messages to return (1-50, default 10)
+ * @param {string} [options.nexusKeyEnvVar]
+ * @returns {Promise<Array|null>} array of { id, user_id, display_name, body, created_at } or null
+ */
+export async function fetchChannelMessages(env, slug, options = {}) {
+  const apiKey = resolveNexusKey(env, options);
+  if (!apiKey || !env.NEXUS_BASE_URL) return null;
+  const limit = options.limit || 10;
+  try {
+    const url = `${env.NEXUS_BASE_URL}/api/bot/channels/${encodeURIComponent(slug)}/messages?limit=${limit}`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.warn(`[nexus] fetchChannelMessages(${slug}) -> ${res.status}: ${text}`);
+      return null;
+    }
+    const j = await res.json().catch(() => ({}));
+    return j?.data || null;
+  } catch (err) {
+    console.warn(`[nexus] fetchChannelMessages(${slug}) failed:`, err.message);
+    return null;
+  }
+}
+
+/**
  * Send a heartbeat ping to Nexus.
  *
  * @param {object} env
