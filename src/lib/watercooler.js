@@ -15,10 +15,8 @@ import { fetchChannelMessages } from "./nexus.js";
 
 const OWN_COOLDOWN_MS = 10 * 60 * 1000;
 const CROSS_BOT_GUARD_MS = 3 * 60 * 1000;
-const WARMTH_WINDOW_MS = 3 * 60 * 1000;
 const MIN_MSG_LENGTH = 15;
 const CHIME_PROBABILITY = 0.10;
-const MIN_HUMAN_MESSAGES = 2;
 
 /**
  * Decide whether this bot should chime in on a watercooler message.
@@ -57,14 +55,6 @@ export async function shouldChimeIn(env, botName, channelSlug, body, nexusOption
     if (uid !== botId && uid.startsWith("bot_") && now - m.created_at < CROSS_BOT_GUARD_MS) {
       return { respond: false, reason: "another bot just spoke" };
     }
-  }
-
-  const humanRecent = recent.filter((m) => {
-    const uid = m.user_id || "";
-    return !uid.startsWith("bot_") && uid !== "system" && now - m.created_at < WARMTH_WINDOW_MS;
-  });
-  if (humanRecent.length < MIN_HUMAN_MESSAGES) {
-    return { respond: false, reason: "channel too quiet" };
   }
 
   if (Math.random() >= CHIME_PROBABILITY) {
