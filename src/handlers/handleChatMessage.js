@@ -34,11 +34,12 @@ import { verifyNexusSignature } from "../lib/callbackSign.js";
 import { parseCommand } from "../lib/commandParser.js";
 import { loadHistory, appendHistory } from "../lib/history.js";
 import { rememberFact, forgetFact, listFacts, buildFactsBlock } from "../lib/memory.js";
-import { callAnthropicWithTools } from "../lib/anthropic.js";
+import { callAnthropicWithTools, callAnthropic } from "../lib/anthropic.js";
 import { postToNexus, sendTyping, fetchChannelMessages } from "../lib/nexus.js";
 import { postApprovalCard } from "../lib/hitl.js";
 import { asEmbedCard, wrapCommandReply, buildCommandTitle, colorForBot } from "../lib/embedCard.js";
 import { buildAttachmentContentBlocks } from "../lib/attachments.js";
+import { shouldChimeIn } from "../lib/watercooler.js";
 
 // Foundation command verbs built per-request (need env + user context)
 const FOUNDATION_VERBS = new Set(["remember", "forget", "facts", "clear", "status"]);
@@ -391,6 +392,58 @@ async function runLlmPipeline({
 }
 
 /**
+ * Lightweight watercooler LLM pipeline. Uses channel history as context
+ * (group conversation, not per-user), Haiku model, no tools, short replies.
+ * Persona comes from config.watercooler.systemPrompt.
+ *
+ * @param {object} args
+ * @returns {Promise<void>}
+ */
+async function runWatercoolerPipeline({ env, channel_slug, config }) {
+  const nexusOptions = { nexusKeyEnvVar: config.nexusKeyEnvVar };
+  const wcConfig = config.watercooler;
+
+  try {
+    await sendTyping(env, channel_slug, "start", nexusOptions);
+
+    const recent = await fetchChannelMessages(env, channel_slug, {
+      ...nexusOptions,
+      limit: 15,
+    });
+    const messages = [];
+    const botId = `bot_${config.botName}`;
+
+    for (const m of (recent || []).reverse()) {
+      if (m.user_id === "system") continue;
+      const isMe = m.user_id === botId;
+      messages.push({
+        role: isMe ? "assistant" : "user",
+        content: isMe ? (m.body || "") : `${m.display_name || m.user_id}: ${m.body || ""}`,
+      });
+    }
+
+    if (messages.length === 0 || messages[messages.length - 1].role !== "user") {
+      return;
+    }
+
+    const response = await callAnthropic(env, wcConfig.systemPrompt, messages, {
+      model: "claude-haiku-4-5-20251001",
+      maxTokens: 150,
+    });
+
+    if (response && response.trim()) {
+      await postToNexus(env, channel_slug, response.trim(), nexusOptions);
+    }
+  } catch (err) {
+    console.error(`[watercooler] ${config.botName} pipeline error:`, err.message);
+  } finally {
+    try {
+      await sendTyping(env, channel_slug, "stop", nexusOptions);
+    } catch { /* ignore */ }
+  }
+}
+
+/**
  * Handle POST /api/internal/chat-message
  *
  * @param {Request} request - Inbound CF Workers Request
@@ -573,7 +626,31 @@ export async function handleChatMessage(request, env, ctx, config) {
     // Unknown !command falls through to LLM
   }
 
-  // ---- 7. Ambient gate (checked AFTER !cmd so explicit commands always pass) -
+  // ---- 7a. Watercooler ambient chime-in (probabilistic, before standard gate) -
+  // When a human posts in the watercooler channel and this bot has watercooler
+  // config, bypass the standard mention-based ambient gate and use the
+  // probabilistic decision engine (10% chance, cooldowns, warmth check).
+  // Direct @mentions in watercooler arrive as trigger_type="mention" and
+  // skip this block entirely, falling through to the standard LLM pipeline.
+  if (
+    trigger_type === "ambient" &&
+    config.watercooler &&
+    channel_slug === (config.watercooler.channelSlug || "watercooler")
+  ) {
+    const nexusOptions = { nexusKeyEnvVar: config.nexusKeyEnvVar };
+    const decision = await shouldChimeIn(
+      env, config.botName, channel_slug, msgBody || "", nexusOptions,
+    );
+    if (!decision.respond) {
+      return json({ success: true, skipped: true, reason: decision.reason });
+    }
+    ctx.waitUntil(
+      runWatercoolerPipeline({ env, channel_slug, config }),
+    );
+    return json({ success: true, queued: true }, 202);
+  }
+
+  // ---- 7b. Ambient gate (checked AFTER !cmd so explicit commands always pass) -
   // The trigger fn gets a 4th arg `meta` carrying out-of-band signals
   // (attachments today; reactions/replies could grow in here). Older
   // triggers ignore extra args; newer per-bot triggers can opt-in to fire

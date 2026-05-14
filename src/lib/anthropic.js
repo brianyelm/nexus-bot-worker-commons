@@ -140,7 +140,7 @@ function extractText(data) {
  * @returns {Promise<string>} Assistant message text
  */
 export async function callAnthropic(env, systemPrompt, messages, options = {}) {
-  const model = env.CLAUDE_MODEL || DEFAULT_MODEL;
+  const model = options.model || env.CLAUDE_MODEL || DEFAULT_MODEL;
   const apiKey = env.ANTHROPIC_API_KEY;
 
   if (!apiKey) throw new Error("[anthropic] ANTHROPIC_API_KEY is not configured");

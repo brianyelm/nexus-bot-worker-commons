@@ -35,6 +35,7 @@ export { postToNexus, attachButtons, attachModals, editNexusMessage, sendNexusHe
 export { reportFleetError } from "./lib/fleetError.js";
 export { postApprovalCard, processButtonClick } from "./lib/hitl.js";
 export { makeShouldRespond } from "./lib/triggers.js";
+export { shouldChimeIn } from "./lib/watercooler.js";
 export {
   asEmbedCard,
   asRichEmbedCard,
