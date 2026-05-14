@@ -41,6 +41,19 @@ import { asEmbedCard, wrapCommandReply, buildCommandTitle, colorForBot } from ".
 import { buildAttachmentContentBlocks } from "../lib/attachments.js";
 import { shouldChimeIn } from "../lib/watercooler.js";
 
+// Detect GIF-only messages so bots receive "[GIF image: <url>]" instead of
+// a bare CDN URL they cannot interpret.
+const GIF_URL_RE = /^https:\/\/(?:media\d*|i)\.giphy\.com\/|^https:\/\/media\.tenor\.com\//i;
+
+function annotateGifBody(body) {
+  if (!body) return body;
+  const trimmed = body.trim();
+  if (GIF_URL_RE.test(trimmed) && !/\s/.test(trimmed)) {
+    return `[GIF image: ${trimmed}]`;
+  }
+  return body;
+}
+
 // Foundation command verbs built per-request (need env + user context)
 const FOUNDATION_VERBS = new Set(["remember", "forget", "facts", "clear", "status"]);
 
@@ -278,7 +291,7 @@ async function runLlmPipeline({
         count: msgs.length,
         messages: msgs.map((m) => ({
           author: m.display_name || m.user_id,
-          body: (m.body || "").slice(0, 500),
+          body: annotateGifBody((m.body || "").slice(0, 500)),
           timestamp: m.created_at,
         })),
       };
@@ -418,7 +431,7 @@ async function runWatercoolerPipeline({ env, channel_slug, config }) {
       const isMe = m.user_id === botId;
       messages.push({
         role: isMe ? "assistant" : "user",
-        content: isMe ? (m.body || "") : `${m.display_name || m.user_id}: ${m.body || ""}`,
+        content: isMe ? (m.body || "") : `${m.display_name || m.user_id}: ${annotateGifBody(m.body || "")}`,
       });
     }
 
@@ -667,7 +680,7 @@ export async function handleChatMessage(request, env, ctx, config) {
   // Nexus aborts the inbound callback fetch at 8s. The tool-use loop routinely
   // takes 30+ seconds. Return 202 immediately and push the pipeline into
   // ctx.waitUntil so it survives the client abort.
-  const labeledUserText = `${display_name || user_id} (uid:${user_id}): ${userText}`;
+  const labeledUserText = `${display_name || user_id} (uid:${user_id}): ${annotateGifBody(userText)}`;
 
   ctx.waitUntil(runLlmPipeline({
     env,
