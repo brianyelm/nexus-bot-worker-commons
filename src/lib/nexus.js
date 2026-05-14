@@ -216,6 +216,53 @@ export async function attachButtons(env, messageId, buttons, options = {}) {
 }
 
 /**
+ * Attach message-modal triggers to a Nexus message.
+ * Uses POST /api/bot/messages/:id/modals (Bearer auth, same as attachButtons).
+ *
+ * Each entry in the modals array is stored in Nexus D1. The UI renders a
+ * trigger button per modal; clicking it opens an inline form overlay. On
+ * submission the server HMAC-signs the payload and POSTs to callback_url.
+ *
+ * @param {object} env
+ * @param {string} messageId - Nexus message id returned by postToNexus
+ * @param {Array<{modal_id: string, title: string, fields: Array<object>, callback_url: string}>} modals
+ * @param {object} [options]
+ * @param {string} [options.nexusKeyEnvVar] - env var name holding the API key
+ * @param {string} [options.callbackSecretEnvVar] - env var name for callback_secret
+ * @param {string} [options.callbackSecret] - callback_secret value directly
+ * @returns {Promise<Array|null>} inserted modal rows or null on error
+ */
+export async function attachModals(env, messageId, modals, options = {}) {
+  const apiKey = resolveNexusKey(env, options);
+  if (!apiKey || !env.NEXUS_BASE_URL) return null;
+
+  const callbackSecret = resolveCallbackSecret(env, options);
+
+  const withSecret = (Array.isArray(modals) ? modals : []).map((m) => ({
+    ...m,
+    ...(callbackSecret ? { callback_secret: callbackSecret } : {}),
+  }));
+
+  try {
+    const result = await _bearerPost(
+      `${env.NEXUS_BASE_URL}/api/bot/messages/${messageId}/modals`,
+      { modals: withSecret },
+      apiKey,
+    );
+    pingBotPresence(env, options).catch(() => {});
+    return result?.data || null;
+  } catch (err) {
+    console.warn(`[nexus] attachModals(${messageId}) failed:`, err.message);
+    _getReportFleetError().then(fn => fn(env, {
+      op: "attachModals",
+      msg: err.message,
+      ctx: { messageId, modalCount: Array.isArray(modals) ? modals.length : null },
+    }, options)).catch(() => {});
+    return null;
+  }
+}
+
+/**
  * Edit a Nexus message previously posted by this bot.
  * Uses PATCH /api/bot/messages/:id (Bearer auth, authorship enforced
  * server-side -- bot can only edit its own messages).
