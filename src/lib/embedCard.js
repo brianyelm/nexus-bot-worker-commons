@@ -81,9 +81,11 @@ export const DEFAULT_COMMAND_COLOR = "#5b8def";
  * for pre-processing use cases (e.g. logging, debugging) or producers that
  * build embed markup manually.
  *
- * Promoted from courtney-worker/src/jobs/ticket-mirror.js (local copy).
- * With this promotion, courtney-worker's local safeEmbedTitle can be removed
- * and replaced with the commons import -- deferred until the next courtney deploy.
+ * Promoted from courtney-worker/src/jobs/ticket-mirror.js. Courtney now
+ * imports this symbol from commons; this is the single source of truth for
+ * the fleet. The promoted version replaces [ and ] with a space (rather
+ * than stripping) and collapses runs, so "[Robert][HIGH] SC case" renders
+ * as "Robert HIGH SC case" instead of "RobertHIGH SC case".
  *
  * @param {string} str
  * @returns {string}
