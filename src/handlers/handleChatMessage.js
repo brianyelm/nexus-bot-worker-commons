@@ -222,6 +222,41 @@ async function runLlmPipeline({
   try {
     history = await loadHistory(env, historyKey, { dbBinding: config.dbBinding });
 
+    // Auto-fetch recent channel messages so the bot knows what the broader
+    // conversation looks like, not just its own per-user history. Default ON;
+    // bots can opt out with config.channelContext = { enabled: false }.
+    let channelContextBlock = "";
+    const ccEnabled = config.channelContext?.enabled !== false;
+    const ccLimit = config.channelContext?.limit ?? 15;
+    if (ccEnabled) {
+      try {
+        const recentMsgs = await fetchChannelMessages(env, channel_slug, {
+          ...nexusOptions,
+          limit: ccLimit,
+        });
+        if (recentMsgs && recentMsgs.length > 0) {
+          const lines = recentMsgs
+            .filter((m) => m.user_id !== "system")
+            .map((m) => {
+              const who = m.display_name || m.user_id;
+              const ts = m.created_at ? m.created_at.slice(11, 16) : "";
+              const body = (m.body || "").slice(0, 300);
+              return `[${ts}] ${who}: ${body}`;
+            });
+          if (lines.length > 0) {
+            channelContextBlock =
+              "\n\nRECENT CHANNEL MESSAGES (context from #" + channel_slug +
+              " so you understand the current conversation):\n" +
+              lines.join("\n") +
+              "\n\nRespond to the latest message directed at you. Use the channel context above " +
+              "to understand what is being discussed, but do not repeat or summarize it unprompted.";
+          }
+        }
+      } catch (err) {
+        console.warn("[handleChatMessage] channel context fetch failed:", err.message);
+      }
+    }
+
     // Multimodal hand-off. If Nexus surfaced any attachments on this turn,
     // fetch each one through the internal-token route, base64-encode, and
     // prepend as `document` / `image` content blocks BEFORE the text body
@@ -262,7 +297,7 @@ async function runLlmPipeline({
       "\n\nTo @-mention a user back in a reply, write @DisplayName (exactly as it appears in the" +
       " message prefix before the colon, e.g. if the message starts with `Dirk (uid:abc123): ...`" +
       " then write @Dirk). Do not invent a user id syntax -- plain @DisplayName is the correct form.";
-    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_MENTION_RULE;
+    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_MENTION_RULE + channelContextBlock;
 
     const channelHistoryTool = {
       name: "read_channel_history",
