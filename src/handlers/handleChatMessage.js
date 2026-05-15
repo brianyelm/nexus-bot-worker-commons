@@ -712,15 +712,20 @@ export async function handleChatMessage(request, env, ctx, config) {
   }
 
   // ---- 7b. Ambient gate (checked AFTER !cmd so explicit commands always pass) -
+  // ownChannels bypass: bots always respond in their own channels without
+  // requiring an @mention. config.ownChannels is an optional array of slugs.
   // The trigger fn gets a 4th arg `meta` carrying out-of-band signals
   // (attachments today; reactions/replies could grow in here). Older
   // triggers ignore extra args; newer per-bot triggers can opt-in to fire
   // on attachment-only drops where the body text alone would not match.
   if (trigger_type === "ambient") {
-    const ambientFn = config.triggers?.ambient;
-    const meta = { attachments: Array.isArray(attachments) ? attachments : [] };
-    if (ambientFn && !ambientFn(msgBody || "", reply_to ?? null, null, meta)) {
-      return json({ success: true, skipped: true });
+    const isOwnChannel = Array.isArray(config.ownChannels) && config.ownChannels.includes(channel_slug);
+    if (!isOwnChannel) {
+      const ambientFn = config.triggers?.ambient;
+      const meta = { attachments: Array.isArray(attachments) ? attachments : [] };
+      if (ambientFn && !ambientFn(msgBody || "", reply_to ?? null, null, meta)) {
+        return json({ success: true, skipped: true });
+      }
     }
   }
 
