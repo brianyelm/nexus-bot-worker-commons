@@ -53,6 +53,17 @@ function mentionsAnyBot(body) {
   return false;
 }
 
+function mentionsOtherBot(body, botName) {
+  for (const [name, aliases] of Object.entries(NAME_ALIASES)) {
+    if (name === botName) continue;
+    for (const alias of aliases) {
+      const re = new RegExp(`\\b${alias}\\b`, "i");
+      if (re.test(body || "")) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Detect whether this bot is in an active back-and-forth with the user who
  * just posted. Walk recent messages backwards: if we find a message from
@@ -102,7 +113,8 @@ export async function shouldChimeIn(env, botName, channelSlug, body, nexusOption
   const now = Date.now();
   const botId = `bot_${botName}`;
 
-  const inConvo = userId && isActiveConvo(recent, botId, userId, now);
+  const addressesOther = mentionsOtherBot(body, botName);
+  const inConvo = userId && !addressesOther && isActiveConvo(recent, botId, userId, now);
   const directlyAddressed = named || inConvo;
 
   if (!directlyAddressed && trimmed.length < MIN_MSG_LENGTH) {
