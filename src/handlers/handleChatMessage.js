@@ -412,9 +412,22 @@ async function runLlmPipeline({
  * @param {object} args
  * @returns {Promise<void>}
  */
-async function runWatercoolerPipeline({ env, channel_slug, config }) {
+async function runWatercoolerPipeline({ env, channel_slug, config, nameMention }) {
   const nexusOptions = { nexusKeyEnvVar: config.nexusKeyEnvVar };
   const wcConfig = config.watercooler;
+
+  const groundingRules = [
+    "GROUNDING RULES (override everything else on conflict):",
+    "- You can ONLY see the messages provided below. Never reference conversations, events, or context you cannot see.",
+    "- If something in the chat doesn't make sense to you, say so naturally or ignore it. Do not fabricate explanations.",
+    "- Stay consistent with your persona. If your background says you enjoy something, own it when asked.",
+    "- Other bots are in this channel too. If their messages seem confused or off-topic, don't play along or pile on.",
+    nameMention
+      ? "- Someone addressed you directly. You MUST respond to them specifically."
+      : "- You are chiming into an ongoing conversation. Keep it natural and brief.",
+  ].join("\n");
+
+  const fullSystemPrompt = `${wcConfig.systemPrompt}\n\n${groundingRules}`;
 
   try {
     await sendTyping(env, channel_slug, "start", nexusOptions);
@@ -439,7 +452,7 @@ async function runWatercoolerPipeline({ env, channel_slug, config }) {
       return;
     }
 
-    const response = await callAnthropic(env, wcConfig.systemPrompt, messages, {
+    const response = await callAnthropic(env, fullSystemPrompt, messages, {
       model: "claude-haiku-4-5-20251001",
       maxTokens: 150,
     });
@@ -658,7 +671,7 @@ export async function handleChatMessage(request, env, ctx, config) {
       return json({ success: true, skipped: true, reason: decision.reason });
     }
     ctx.waitUntil(
-      runWatercoolerPipeline({ env, channel_slug, config }),
+      runWatercoolerPipeline({ env, channel_slug, config, nameMention: !!decision.nameMention }),
     );
     return json({ success: true, queued: true }, 202);
   }
