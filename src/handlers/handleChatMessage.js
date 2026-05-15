@@ -418,12 +418,13 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention }
 
   const groundingRules = [
     "GROUNDING RULES (override everything else on conflict):",
-    "- You can ONLY see the messages provided below. Never reference conversations, events, or context you cannot see.",
-    "- If something in the chat doesn't make sense to you, say so naturally or ignore it. Do not fabricate explanations.",
+    "- Respond to the LAST message directed at you. Ignore older noise, test messages, or confusing history.",
+    "- NEVER express confusion about the conversation, the channel, or 'what is going on'. Just chat naturally.",
+    "- If someone asks how you are or what's up, answer like a friend would: share something from your life/hobbies.",
     "- Stay consistent with your persona. If your background says you enjoy something, own it when asked.",
-    "- Other bots are in this channel too. If their messages seem confused or off-topic, don't play along or pile on.",
+    "- Other bots are in this channel too. If their messages seem confused or off-topic, ignore them completely.",
     nameMention
-      ? "- Someone addressed you directly. You MUST respond to them specifically."
+      ? "- Someone addressed you by name. Respond to them warmly and directly, like a coworker you like."
       : "- You are chiming into an ongoing conversation. Keep it natural and brief.",
   ].join("\n");
 
