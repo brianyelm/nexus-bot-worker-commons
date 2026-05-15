@@ -3,8 +3,9 @@
 //
 // Two tiers:
 //   Tier 1 (name mention): someone said this bot's name -> always respond
-//          (bypasses probability + cross-bot guard; own-cooldown still applies)
+//          (bypasses probability + cross-bot guard; short cooldown applies)
 //   Tier 2 (ambient):      probabilistic chime-in (~12%), rate-limited
+//          suppressed when the message clearly addresses a different bot
 //
 // Usage (from handleChatMessage):
 //   const decision = await shouldChimeIn(env, "robert", "watercooler", body, nexusOpts);
@@ -13,7 +14,8 @@
 
 import { fetchChannelMessages } from "./nexus.js";
 
-const OWN_COOLDOWN_MS = 10 * 60 * 1000;
+const OWN_COOLDOWN_MS = 90 * 1000;
+const AMBIENT_COOLDOWN_MS = 10 * 60 * 1000;
 const CROSS_BOT_GUARD_MS = 3 * 60 * 1000;
 const MIN_MSG_LENGTH = 15;
 const CHIME_PROBABILITY = 0.12;
@@ -35,6 +37,16 @@ function mentionsBotName(body, botName) {
   for (const alias of aliases) {
     const re = new RegExp(`\\b${alias}\\b`, "i");
     if (re.test(lower)) return true;
+  }
+  return false;
+}
+
+function mentionsAnyBot(body) {
+  for (const [, aliases] of Object.entries(NAME_ALIASES)) {
+    for (const alias of aliases) {
+      const re = new RegExp(`\\b${alias}\\b`, "i");
+      if (re.test(body || "")) return true;
+    }
   }
   return false;
 }
@@ -65,10 +77,10 @@ export async function shouldChimeIn(env, botName, channelSlug, body, nexusOption
 
   const now = Date.now();
   const botId = `bot_${botName}`;
+  const cooldown = named ? OWN_COOLDOWN_MS : AMBIENT_COOLDOWN_MS;
 
-  // Own cooldown always applies (prevents spam even on direct address)
   for (const m of recent) {
-    if (m.user_id === botId && now - m.created_at < OWN_COOLDOWN_MS) {
+    if (m.user_id === botId && now - m.created_at < cooldown) {
       return { respond: false, reason: "own cooldown" };
     }
   }
@@ -79,6 +91,11 @@ export async function shouldChimeIn(env, botName, channelSlug, body, nexusOption
   }
 
   // Tier 2: ambient probabilistic
+  // Suppress when the message addresses a different bot by name
+  if (mentionsAnyBot(body)) {
+    return { respond: false, reason: "message addresses another bot" };
+  }
+
   for (const m of recent) {
     const uid = m.user_id || "";
     if (uid !== botId && uid.startsWith("bot_") && now - m.created_at < CROSS_BOT_GUARD_MS) {

@@ -458,7 +458,8 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention }
     });
 
     if (response && response.trim()) {
-      await postToNexus(env, channel_slug, response.trim(), nexusOptions);
+      const cleaned = response.trim().replace(/[—–]/g, "-");
+      await postToNexus(env, channel_slug, cleaned, nexusOptions);
     }
   } catch (err) {
     console.error(`[watercooler] ${config.botName} pipeline error:`, err.message);
