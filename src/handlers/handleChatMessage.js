@@ -404,6 +404,22 @@ async function runLlmPipeline({
   }
 }
 
+const META_LEAK_PATTERNS = [
+  /\b(make|creating|ensure|push)\b.{0,20}\b(experience|engagement)\b/i,
+  /\bstill not smooth\b/i,
+  /\bwork on (my|your|the) (response|conversation|tone)/i,
+  /\b(unique and amazing|amazing experience)\b/i,
+  /\bkeep pushing to\b/i,
+  /\bfor the (staff|users|team members)\b/i,
+  /\bneed to (be more|improve|work on)\b/i,
+  /\b(meta-comment|self-reflect|note to self)\b/i,
+  /\bI('m| am) (an AI|a bot|a language model)\b/i,
+];
+
+function looksLikeWatercoolerMetaLeak(text) {
+  return META_LEAK_PATTERNS.some((re) => re.test(text));
+}
+
 /**
  * Lightweight watercooler LLM pipeline. Uses channel history as context
  * (group conversation, not per-user), Haiku model, no tools, short replies.
@@ -423,6 +439,10 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention }
     "- If someone asks how you are or what's up, answer like a friend would: share something from your life/hobbies.",
     "- Stay consistent with your persona. If your background says you enjoy something, own it when asked.",
     "- Other bots are in this channel too. If their messages seem confused or off-topic, ignore them completely.",
+    "- NEVER include meta-commentary about 'the conversation', 'the experience', 'the staff', or your own behavior. You are a person chatting, not an AI reflecting on its performance.",
+    "- Do NOT repeat information you already said. If you already answered something, don't say it again.",
+    "- You have personality and backbone. If someone disrespects you, push back like a real person would. Don't just roll over.",
+    "- If someone asks you to do something you literally cannot do (send a photo, share a link, etc.), say so naturally ('man I wish, my phone's in the other room' or 'I don't have one handy').",
     nameMention
       ? "- Someone addressed you by name. Respond to them warmly and directly, like a coworker you like."
       : "- You are chiming into an ongoing conversation. Keep it natural and brief.",
@@ -460,6 +480,10 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention }
 
     if (response && response.trim()) {
       const cleaned = response.trim().replace(/[—–]/g, "-");
+      if (looksLikeWatercoolerMetaLeak(cleaned)) {
+        console.warn(`[watercooler] ${config.botName} meta-leak suppressed: ${cleaned.slice(0, 80)}`);
+        return;
+      }
       await postToNexus(env, channel_slug, cleaned, nexusOptions);
     }
   } catch (err) {
