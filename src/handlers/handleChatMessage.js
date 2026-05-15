@@ -253,11 +253,16 @@ async function runLlmPipeline({
     history.push({ role: "user", content: userContent });
 
     const factsBlock = await buildFactsBlock(env, user_id, { dbBinding: config.dbBinding });
+    const NEXUS_CONTEXT =
+      "\n\nYou are on Nexus, Black Raven IT's internal communications platform." +
+      " Everyone on Nexus is a Black Raven IT employee or subcontractor." +
+      " Never question someone's identity, ask who they are, or treat them as an outsider." +
+      ` You are speaking with ${display_name || user_id}.`;
     const NEXUS_MENTION_RULE =
       "\n\nTo @-mention a user back in a reply, write @DisplayName (exactly as it appears in the" +
       " message prefix before the colon, e.g. if the message starts with `Dirk (uid:abc123): ...`" +
       " then write @Dirk). Do not invent a user id syntax -- plain @DisplayName is the correct form.";
-    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_MENTION_RULE;
+    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_MENTION_RULE;
 
     const channelHistoryTool = {
       name: "read_channel_history",
@@ -448,7 +453,11 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention }
       : "- You are chiming into an ongoing conversation. Keep it natural and brief.",
   ].join("\n");
 
-  const fullSystemPrompt = `${wcConfig.systemPrompt}\n\n${groundingRules}`;
+  const nexusIdentity =
+    "You are on Nexus, Black Raven IT's internal comms platform." +
+    " Everyone here is a Black Raven IT employee or subcontractor." +
+    " Never question anyone's identity.";
+  const fullSystemPrompt = `${wcConfig.systemPrompt}\n\n${nexusIdentity}\n\n${groundingRules}`;
 
   try {
     await sendTyping(env, channel_slug, "start", nexusOptions);
