@@ -666,7 +666,7 @@ export async function handleChatMessage(request, env, ctx, config) {
   ) {
     const nexusOptions = { nexusKeyEnvVar: config.nexusKeyEnvVar };
     const decision = await shouldChimeIn(
-      env, config.botName, channel_slug, msgBody || "", nexusOptions,
+      env, config.botName, channel_slug, msgBody || "", nexusOptions, user_id,
     );
     if (!decision.respond) {
       return json({ success: true, skipped: true, reason: decision.reason });
