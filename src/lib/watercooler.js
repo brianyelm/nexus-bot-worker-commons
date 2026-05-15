@@ -48,11 +48,12 @@ function mentionsBotName(body, botName) {
  * @returns {Promise<{respond: boolean, reason: string, nameMention?: boolean}>}
  */
 export async function shouldChimeIn(env, botName, channelSlug, body, nexusOptions) {
-  if ((body || "").trim().length < MIN_MSG_LENGTH) {
+  const trimmed = (body || "").trim();
+  const named = mentionsBotName(body, botName);
+
+  if (!named && trimmed.length < MIN_MSG_LENGTH) {
     return { respond: false, reason: "too short" };
   }
-
-  const named = mentionsBotName(body, botName);
 
   const recent = await fetchChannelMessages(env, channelSlug, {
     ...nexusOptions,
