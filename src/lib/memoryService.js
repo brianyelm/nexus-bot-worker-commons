@@ -1,0 +1,169 @@
+// =============================================================================
+// lib/memoryService.js - Client for the centralized memory-worker service
+//
+// Consumed via service binding (env.MEMORY). All calls are best-effort:
+// a memory-worker outage must never break the chat pipeline.
+//
+// If env.MEMORY is not bound, all functions no-op silently.
+//
+// Usage in handleChatMessage:
+//   After appendHistory, call persistTurnPair() to forward the user+assistant
+//   turns to the memory service for structured storage and eventual fact
+//   extraction.
+// =============================================================================
+
+const BOT_HEADER = 'X-Memory-Bot';
+
+async function memoryFetch(env, botId, path, body) {
+  if (!env.MEMORY) return null;
+  try {
+    const resp = await env.MEMORY.fetch(new Request(`https://internal${path}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', [BOT_HEADER]: botId },
+      body: JSON.stringify(body),
+    }));
+    if (!resp.ok) {
+      console.warn(`[memoryService] ${path} ${resp.status}`);
+      return null;
+    }
+    return await resp.json();
+  } catch (err) {
+    console.warn(`[memoryService] ${path}: ${err?.message}`);
+    return null;
+  }
+}
+
+async function memoryGet(env, botId, path) {
+  if (!env.MEMORY) return null;
+  try {
+    const resp = await env.MEMORY.fetch(new Request(`https://internal${path}`, {
+      method: 'GET',
+      headers: { [BOT_HEADER]: botId },
+    }));
+    if (!resp.ok) return null;
+    return await resp.json();
+  } catch (err) {
+    console.warn(`[memoryService] GET ${path}: ${err?.message}`);
+    return null;
+  }
+}
+
+/**
+ * Persist a user+assistant turn pair to the memory service.
+ * Called after appendHistory in the chat pipeline.
+ *
+ * @param {object} env - Worker env with MEMORY service binding
+ * @param {string} botId - Bot identifier (e.g. 'jacob', 'courtney', 'wren')
+ * @param {object} params
+ * @param {string} params.sessionId - Conversation session identifier
+ * @param {string} [params.entityId] - Memory entity ID for the user (if resolved)
+ * @param {string} params.userText - The user's message
+ * @param {string} params.assistantText - The bot's response
+ * @param {string} [params.channel] - Channel name/slug
+ */
+export async function persistTurnPair(env, botId, { sessionId, entityId, userText, assistantText, channel }) {
+  if (!env.MEMORY) return;
+  await memoryFetch(env, botId, '/turns', {
+    session_id: sessionId,
+    entity_id: entityId || null,
+    role: 'user',
+    content: userText,
+    channel,
+  });
+  await memoryFetch(env, botId, '/turns', {
+    session_id: sessionId,
+    entity_id: entityId || null,
+    role: 'assistant',
+    content: assistantText,
+    channel,
+  });
+}
+
+/**
+ * Resolve or create a memory entity for a Nexus user.
+ * Returns the entity_id for subsequent turn/fact storage.
+ *
+ * @param {object} env
+ * @param {string} botId
+ * @param {object} params
+ * @param {string} params.userId - Nexus user_id
+ * @param {string} [params.displayName]
+ * @param {string} [params.type] - Entity type (default: 'contact')
+ * @returns {Promise<string|null>} entity_id or null
+ */
+export async function resolveEntity(env, botId, { userId, displayName, type = 'contact' }) {
+  if (!env.MEMORY) return null;
+  const result = await memoryFetch(env, botId, '/entities', {
+    type,
+    display_name: displayName || userId,
+    external_ids: { nexus_user_id: userId },
+  });
+  return result?.id || null;
+}
+
+/**
+ * Get full context for an entity (facts, recent turns, sessions).
+ *
+ * @param {object} env
+ * @param {string} botId
+ * @param {string} entityId
+ * @param {string} [query] - Optional query for semantic search
+ * @returns {Promise<object|null>}
+ */
+export async function getEntityContext(env, botId, entityId, query) {
+  if (!env.MEMORY) return null;
+  return await memoryFetch(env, botId, '/context', {
+    entity_id: entityId,
+    query: query || undefined,
+  });
+}
+
+/**
+ * Start a memory session.
+ *
+ * @param {object} env
+ * @param {string} botId
+ * @param {object} params
+ * @param {string} [params.entityId]
+ * @param {string} [params.channel]
+ * @returns {Promise<string|null>} session_id
+ */
+export async function startMemorySession(env, botId, { entityId, channel } = {}) {
+  if (!env.MEMORY) return null;
+  const result = await memoryFetch(env, botId, '/sessions/start', {
+    entity_id: entityId || null,
+    channel: channel || null,
+  });
+  return result?.id || null;
+}
+
+/**
+ * End a memory session with an optional summary.
+ */
+export async function endMemorySession(env, botId, sessionId, summary) {
+  if (!env.MEMORY) return;
+  await memoryFetch(env, botId, '/sessions/end', { session_id: sessionId, summary });
+}
+
+/**
+ * Assert a structured fact about an entity.
+ */
+export async function assertFact(env, botId, { subjectId, predicate, object, confidence, sourceTurnId }) {
+  if (!env.MEMORY) return null;
+  return await memoryFetch(env, botId, '/facts', {
+    subject_id: subjectId,
+    predicate,
+    object,
+    confidence: confidence || 1.0,
+    source_turn_id: sourceTurnId || null,
+  });
+}
+
+/**
+ * Get active facts for an entity.
+ */
+export async function getEntityFacts(env, botId, entityId) {
+  if (!env.MEMORY) return [];
+  const result = await memoryGet(env, botId, `/entities/${entityId}/facts`);
+  return result?.facts || [];
+}

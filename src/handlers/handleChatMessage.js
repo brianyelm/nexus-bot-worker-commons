@@ -34,6 +34,7 @@ import { verifyNexusSignature } from "../lib/callbackSign.js";
 import { parseCommand } from "../lib/commandParser.js";
 import { loadHistory, appendHistory } from "../lib/history.js";
 import { rememberFact, forgetFact, listFacts, buildFactsBlock } from "../lib/memory.js";
+import { persistTurnPair, resolveEntity } from "../lib/memoryService.js";
 import { callAnthropicWithTools, callAnthropic } from "../lib/anthropic.js";
 import { postToNexus, sendTyping, fetchChannelMessages } from "../lib/nexus.js";
 import { postApprovalCard } from "../lib/hitl.js";
@@ -433,6 +434,20 @@ async function runLlmPipeline({
     await appendHistory(env, historyKey, "assistant", responseText, { dbBinding: config.dbBinding });
   } catch (err) {
     console.error("[handleChatMessage] history persist error:", err.message);
+  }
+
+  // Forward to centralized memory service (best-effort, no-op if MEMORY binding absent)
+  if (env.MEMORY && config.botName) {
+    try {
+      await persistTurnPair(env, config.botName, {
+        sessionId: historyKey,
+        userText: labeledUserText,
+        assistantText: responseText,
+        channel: channel_slug,
+      });
+    } catch (err) {
+      console.warn("[handleChatMessage] memory service persist:", err?.message);
+    }
   }
 
   if (visibleResponse) {
