@@ -26,6 +26,7 @@
 // =============================================================================
 
 export { handleChatMessage } from "./handlers/handleChatMessage.js";
+export { handleCommandList, FOUNDATION_COMMAND_META } from "./handlers/handleCommandList.js";
 export { callAnthropic, callAnthropicWithTools } from "./lib/anthropic.js";
 export { verifyNexusSignature, timingSafeEqual } from "./lib/callbackSign.js";
 export { parseCommand } from "./lib/commandParser.js";
