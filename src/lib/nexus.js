@@ -63,6 +63,35 @@ function resolveNexusKey(env, options = {}) {
 }
 
 /**
+ * Derive a human-readable bot display name from the nexusKeyEnvVar option or
+ * the BOT_DISPLAY_NAME env binding. Used when calling reportFleetError so
+ * errors in #fleet-errors are attributed to the right bot rather than
+ * falling back to "unknown-bot".
+ *
+ * Resolution order:
+ *   1. options.nexusKeyEnvVar stripped of "_NEXUS_KEY" suffix (e.g.
+ *      "COURTNEY_NEXUS_KEY" -> "Courtney", "BOT_NEXUS_KEY" -> "Bot")
+ *   2. env.BOT_DISPLAY_NAME (wrangler [vars] entry, set per-worker)
+ *   3. undefined (reportFleetError uses its own fallback "unknown-bot")
+ *
+ * @param {object} env
+ * @param {object} [options]
+ * @returns {string|undefined}
+ */
+function deriveBotName(env, options = {}) {
+  if (options.nexusKeyEnvVar) {
+    // Strip the "_NEXUS_KEY" or "_NEXUS_KEY_TEST" suffix and title-case the remainder.
+    const raw = options.nexusKeyEnvVar.replace(/_NEXUS_KEY(?:_TEST)?$/, "");
+    if (raw && raw !== options.nexusKeyEnvVar) {
+      // Convert SCREAMING_SNAKE to Title Case: "COURTNEY" -> "Courtney"
+      return raw.charAt(0).toUpperCase() + raw.slice(1).toLowerCase();
+    }
+  }
+  if (env && env.BOT_DISPLAY_NAME) return String(env.BOT_DISPLAY_NAME);
+  return undefined;
+}
+
+/**
  * Resolve the callback secret from env.
  *
  * @param {object} env
@@ -207,6 +236,7 @@ export async function attachButtons(env, messageId, buttons, options = {}) {
   } catch (err) {
     console.warn(`[nexus] attachButtons(${messageId}) failed:`, err.message);
     _getReportFleetError().then(fn => fn(env, {
+      bot: deriveBotName(env, options),
       op: "attachButtons",
       msg: err.message,
       ctx: { messageId, buttonCount: Array.isArray(buttons) ? buttons.length : null },
@@ -254,6 +284,7 @@ export async function attachModals(env, messageId, modals, options = {}) {
   } catch (err) {
     console.warn(`[nexus] attachModals(${messageId}) failed:`, err.message);
     _getReportFleetError().then(fn => fn(env, {
+      bot: deriveBotName(env, options),
       op: "attachModals",
       msg: err.message,
       ctx: { messageId, modalCount: Array.isArray(modals) ? modals.length : null },
@@ -298,6 +329,7 @@ export async function editNexusMessage(env, messageId, body, options = {}) {
       const text = await res.text().catch(() => "");
       console.warn(`[nexus] editNexusMessage(${messageId}) -> ${res.status}: ${text}`);
       _getReportFleetError().then(fn => fn(env, {
+        bot: deriveBotName(env, options),
         op: "editNexusMessage",
         msg: `HTTP ${res.status}: ${text.slice(0, 120)}`,
         ctx: { messageId },
@@ -311,6 +343,7 @@ export async function editNexusMessage(env, messageId, body, options = {}) {
   } catch (err) {
     console.warn(`[nexus] editNexusMessage(${messageId}) failed:`, err.message);
     _getReportFleetError().then(fn => fn(env, {
+      bot: deriveBotName(env, options),
       op: "editNexusMessage",
       msg: err.message,
       ctx: { messageId },
