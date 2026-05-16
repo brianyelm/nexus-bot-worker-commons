@@ -178,9 +178,11 @@ export async function postToNexus(env, slug, content, options = {}) {
   }
   const body = typeof content === "string" ? content.slice(0, 8000) : String(content).slice(0, 8000);
   try {
+    const payload = { channel_slug: slug, body };
+    if (options.reply_to) payload.reply_to = options.reply_to;
     const result = await _post(
       `${env.NEXUS_BASE_URL}/api/bot/messages`,
-      { channel_slug: slug, body },
+      payload,
       apiKey,
     );
     // Stamp presence fire-and-forget so the dot turns green. Do not await.

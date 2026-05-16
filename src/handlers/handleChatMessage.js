@@ -483,7 +483,7 @@ function looksLikeWatercoolerMetaLeak(text) {
  * @param {object} args
  * @returns {Promise<void>}
  */
-async function runWatercoolerPipeline({ env, channel_slug, config, nameMention }) {
+async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, triggerUserId, triggerDisplayName, triggerBody, triggerMessageId }) {
   const nexusOptions = { nexusKeyEnvVar: config.nexusKeyEnvVar };
   const wcConfig = config.watercooler;
 
@@ -501,6 +501,9 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention }
     nameMention
       ? "- Someone addressed you by name. Respond to them warmly and directly, like a coworker you like."
       : "- You are chiming into an ongoing conversation. Keep it natural and brief.",
+    ...(nameMention && triggerDisplayName && triggerBody
+      ? [`- You are responding to ${triggerDisplayName}. Their latest message: '${triggerBody.slice(0, 300)}'. Reply to THEM specifically. Don't get distracted by other conversations in the channel.`]
+      : []),
   ].join("\n");
 
   const nexusIdentity =
@@ -522,9 +525,12 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention }
     for (const m of (recent || []).reverse()) {
       if (m.user_id === "system") continue;
       const isMe = m.user_id === botId;
+      const talkingToYou = nameMention && triggerUserId && m.user_id === triggerUserId;
       messages.push({
         role: isMe ? "assistant" : "user",
-        content: isMe ? (m.body || "") : `${m.display_name || m.user_id}: ${annotateGifBody(m.body || "")}`,
+        content: isMe
+          ? (m.body || "")
+          : `${talkingToYou ? "[TALKING TO YOU] " : ""}${m.display_name || m.user_id}: ${annotateGifBody(m.body || "")}`,
       });
     }
 
@@ -543,7 +549,9 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention }
         console.warn(`[watercooler] ${config.botName} meta-leak suppressed: ${cleaned.slice(0, 80)}`);
         return;
       }
-      await postToNexus(env, channel_slug, cleaned, nexusOptions);
+      const postOpts = { ...nexusOptions };
+      if (nameMention && triggerMessageId) postOpts.reply_to = triggerMessageId;
+      await postToNexus(env, channel_slug, cleaned, postOpts);
     }
   } catch (err) {
     console.error(`[watercooler] ${config.botName} pipeline error:`, err.message);
@@ -594,6 +602,7 @@ export async function handleChatMessage(request, env, ctx, config) {
 
   // ---- 4. Validate required fields -----------------------------------------
   const {
+    message_id,
     user_id,
     display_name,
     body: msgBody,
@@ -756,7 +765,16 @@ export async function handleChatMessage(request, env, ctx, config) {
       return json({ success: true, skipped: true, reason: decision.reason });
     }
     ctx.waitUntil(
-      runWatercoolerPipeline({ env, channel_slug, config, nameMention: !!decision.nameMention }),
+      runWatercoolerPipeline({
+        env,
+        channel_slug,
+        config,
+        nameMention: !!decision.nameMention,
+        triggerUserId: user_id,
+        triggerDisplayName: display_name,
+        triggerBody: msgBody,
+        triggerMessageId: message_id,
+      }),
     );
     return json({ success: true, queued: true }, 202);
   }

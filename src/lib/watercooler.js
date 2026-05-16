@@ -65,28 +65,63 @@ function mentionsOtherBot(body, botName) {
 }
 
 /**
- * Detect whether this bot is in an active back-and-forth with the user who
- * just posted. Walk recent messages backwards: if we find a message from
- * this bot within CONVO_WINDOW_MS, AND the message before it (or after it
- * in the list) was from the same user_id that triggered this callback,
- * the bot is mid-conversation and should keep responding.
+ * Detect whether this bot is in an active back-and-forth with a specific
+ * user. Window-based: find the bot's most recent post within
+ * CONVO_WINDOW_MS, then check whether userId posted at least once between
+ * that bot post and now. No adjacency required -- interleaving messages
+ * from other people do not break the conversation.
  *
  * @param {object[]} recent - messages newest-first
  * @param {string} botId - e.g. "bot_robert"
- * @param {string} userId - the human who just posted
+ * @param {string} userId - the human to check against
  * @param {number} now
  * @returns {boolean}
  */
 function isActiveConvo(recent, botId, userId, now) {
+  // Find the bot's most recent post within the conversation window.
+  let botPostIndex = -1;
   for (let i = 0; i < recent.length; i++) {
-    const m = recent[i];
-    if (m.user_id === botId && now - m.created_at < CONVO_WINDOW_MS) {
-      const prev = recent[i + 1];
-      if (prev && prev.user_id === userId) return true;
-      if (i > 0 && recent[i - 1].user_id === userId) return true;
+    if (recent[i].user_id === botId && now - recent[i].created_at < CONVO_WINDOW_MS) {
+      botPostIndex = i;
+      break;
     }
   }
+  if (botPostIndex < 0) return false;
+
+  // Check if userId posted at least once between the bot's post and now
+  // (i.e. in the messages newer than the bot's post).
+  for (let i = 0; i < botPostIndex; i++) {
+    if (recent[i].user_id === userId) return true;
+  }
   return false;
+}
+
+/**
+ * Find the userId the bot is currently in an active conversation with
+ * (if any). Returns the partner's user_id or null.
+ *
+ * @param {object[]} recent - messages newest-first
+ * @param {string} botId
+ * @param {number} now
+ * @returns {string|null}
+ */
+function findActiveConvoPartner(recent, botId, now) {
+  // Find the bot's most recent post within the conversation window.
+  let botPostIndex = -1;
+  for (let i = 0; i < recent.length; i++) {
+    if (recent[i].user_id === botId && now - recent[i].created_at < CONVO_WINDOW_MS) {
+      botPostIndex = i;
+      break;
+    }
+  }
+  if (botPostIndex < 0) return null;
+
+  // Walk messages newer than the bot's post to find a human who replied.
+  for (let i = botPostIndex - 1; i >= 0; i--) {
+    const uid = recent[i].user_id;
+    if (uid && !uid.startsWith("bot_") && uid !== "system") return uid;
+  }
+  return null;
 }
 
 /**
@@ -116,6 +151,17 @@ export async function shouldChimeIn(env, botName, channelSlug, body, nexusOption
   const addressesOther = mentionsOtherBot(body, botName);
   const inConvo = userId && !addressesOther && isActiveConvo(recent, botId, userId, now);
   const directlyAddressed = named || inConvo;
+
+  // Active-conversation suppression: if this bot is mid-conversation with
+  // someone else and the current message is NOT from that partner and is NOT
+  // a direct name-mention, suppress ambient chime-in so the bot stays
+  // focused on its current conversation partner.
+  if (!named && userId) {
+    const partner = findActiveConvoPartner(recent, botId, now);
+    if (partner && partner !== userId) {
+      return { respond: false, reason: "active conversation with someone else" };
+    }
+  }
 
   if (!directlyAddressed && trimmed.length < MIN_MSG_LENGTH) {
     return { respond: false, reason: "too short" };
