@@ -533,8 +533,8 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention }
     }
 
     const response = await callAnthropic(env, fullSystemPrompt, messages, {
-      model: "claude-haiku-4-5-20251001",
-      maxTokens: 150,
+      model: "claude-sonnet-4-6",
+      maxTokens: 250,
     });
 
     if (response && response.trim()) {
