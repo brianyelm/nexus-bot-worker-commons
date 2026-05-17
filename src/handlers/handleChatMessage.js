@@ -38,6 +38,7 @@ import { persistTurnPair, resolveEntity } from "../lib/memoryService.js";
 import { callAnthropicWithTools, callAnthropic } from "../lib/anthropic.js";
 import { postToNexus, sendTyping, fetchChannelMessages } from "../lib/nexus.js";
 import { postApprovalCard } from "../lib/hitl.js";
+import { withProvenance } from "../lib/provenanceContext.js";
 import { asEmbedCard, wrapCommandReply, buildCommandTitle, colorForBot, bangReport } from "../lib/embedCard.js";
 import { buildAttachmentContentBlocks } from "../lib/attachments.js";
 import { shouldChimeIn } from "../lib/watercooler.js";
@@ -841,7 +842,7 @@ export async function handleChatMessage(request, env, ctx, config) {
       // potentially re-dispatching the callback, which was causing
       // duplicate message storms (bug 2026-05-13).
       ctx.waitUntil(
-        (async () => {
+        withProvenance("user-command", async () => {
           try {
             await handler(cmdCtx);
           } catch (err) {
@@ -858,7 +859,7 @@ export async function handleChatMessage(request, env, ctx, config) {
               ).catch(() => {});
             }
           }
-        })()
+        })
       );
       return json({ success: true, queued: true }, 202);
     }
@@ -884,7 +885,7 @@ export async function handleChatMessage(request, env, ctx, config) {
       return json({ success: true, skipped: true, reason: decision.reason });
     }
     ctx.waitUntil(
-      runWatercoolerPipeline({
+      withProvenance("mention-reply", () => runWatercoolerPipeline({
         env,
         channel_slug,
         config,
@@ -893,7 +894,7 @@ export async function handleChatMessage(request, env, ctx, config) {
         triggerDisplayName: display_name,
         triggerBody: msgBody,
         triggerMessageId: message_id,
-      }),
+      })),
     );
     return json({ success: true, queued: true }, 202);
   }
@@ -913,7 +914,7 @@ export async function handleChatMessage(request, env, ctx, config) {
   // ctx.waitUntil so it survives the client abort.
   const labeledUserText = `${display_name || user_id} (uid:${user_id}): ${annotateGifBody(userText)}`;
 
-  ctx.waitUntil(runLlmPipeline({
+  ctx.waitUntil(withProvenance("mention-reply", () => runLlmPipeline({
     env,
     user_id,
     display_name,
@@ -923,7 +924,7 @@ export async function handleChatMessage(request, env, ctx, config) {
     historyKey,
     attachments,
     config,
-  }));
+  })));
 
   return json({ success: true, queued: true }, 202);
 }
