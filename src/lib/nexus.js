@@ -178,8 +178,10 @@ export async function postToNexus(env, slug, content, options = {}) {
   }
   const body = typeof content === "string" ? content.slice(0, 8000) : String(content).slice(0, 8000);
   try {
+    const provenance = options.provenance ?? getProvenanceContext() ?? null;
     const payload = { channel_slug: slug, body };
     if (options.reply_to) payload.reply_to = options.reply_to;
+    if (provenance) payload.provenance = provenance;
     const result = await _post(
       `${env.NEXUS_BASE_URL}/api/bot/messages`,
       payload,

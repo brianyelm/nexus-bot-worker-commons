@@ -38,7 +38,7 @@ import { persistTurnPair, resolveEntity } from "../lib/memoryService.js";
 import { callAnthropicWithTools, callAnthropic } from "../lib/anthropic.js";
 import { postToNexus, sendTyping, fetchChannelMessages } from "../lib/nexus.js";
 import { postApprovalCard } from "../lib/hitl.js";
-import { asEmbedCard, wrapCommandReply, buildCommandTitle, colorForBot } from "../lib/embedCard.js";
+import { asEmbedCard, wrapCommandReply, buildCommandTitle, colorForBot, bangReport } from "../lib/embedCard.js";
 import { buildAttachmentContentBlocks } from "../lib/attachments.js";
 import { shouldChimeIn } from "../lib/watercooler.js";
 
@@ -175,9 +175,21 @@ function buildFoundationHandlers(env, userId, historyKey, channel_slug, config, 
         .then(h => h.length)
         .catch(() => 0);
       const enabledKey = `${botName.toUpperCase().replace(/-/g, "_")}_WORKER_ENABLED`;
-      await cmdCtx.reply(
-        `Chat history: ${histDepth} turns\nWorker: ${botName}-worker (CF Workers)\nEnabled: ${env[enabledKey] || "unknown"}`
-      );
+      const displayName = (config.persona?.displayName || botName).split(/\s+/)[0];
+      const body = [
+        `Worker:           ${botName}-worker (CF Workers)`,
+        `Master gate:      ${env[enabledKey] || "unknown"}`,
+        `Commit:           ${env.COMMIT || "unknown"}`,
+        `Deployed:         ${env.DEPLOYED_AT || "unknown"}`,
+        ``,
+        `Your history depth: ${histDepth} turns`,
+      ].join("\n");
+      await cmdCtx.reply(bangReport({
+        botName: displayName,
+        verb: cmdCtx.verb,
+        args: cmdCtx.args,
+        sections: [body],
+      }));
     },
   };
 }
@@ -469,10 +481,50 @@ const META_LEAK_PATTERNS = [
   /\bneed to (be more|improve|work on)\b/i,
   /\b(meta-comment|self-reflect|note to self)\b/i,
   /\bI('m| am) (an AI|a bot|a language model)\b/i,
+  /\bI('m| am) (reading|interpreting|treating) this as\b/i,
+  /\bnot responding to\b.{0,30}\b(that|this|the last)\b/i,
+  /\bkeep it professional\b/i,
+  /\blet me respond naturally\b/i,
+  /\bignore.{0,20}\bnoise\b/i,
+  /\bfocus on what('s| is) actually directed\b/i,
+  /\b\(I('m| am) \w+, not \w+/i,
+  /\bresponding to \w+'s (question|message|comment)\b/i,
+  /\bnot (going to|gonna) (respond|reply|engage)\b/i,
+  /\bjust going to ignore\b/i,
 ];
 
 function looksLikeWatercoolerMetaLeak(text) {
   return META_LEAK_PATTERNS.some((re) => re.test(text));
+}
+
+/**
+ * Detect verbatim repetition: any 5+ consecutive-word phrase from the
+ * candidate response that also appears in one of the bot's recent messages.
+ * Catches model regurgitation when Sonnet locks onto a persona catchphrase
+ * (e.g. "Ferris is my cat, named after Ferris Bueller") and emits it on
+ * every reply regardless of what the user asked.
+ *
+ * @param {string} response - the candidate response text
+ * @param {string[]} previousBotBodies - this bot's recent message bodies
+ * @returns {string|null} the repeated phrase, or null if none found
+ */
+function findRepeatedPhrase(response, previousBotBodies) {
+  const norm = (s) => (s || "").toLowerCase().replace(/[^\w\s]/g, " ").split(/\s+/).filter(Boolean);
+  const respWords = norm(response);
+  if (respWords.length < 5) return null;
+  for (const prev of previousBotBodies) {
+    const prevWords = norm(prev);
+    if (prevWords.length < 5) continue;
+    const prevChunks = new Set();
+    for (let j = 0; j <= prevWords.length - 5; j++) {
+      prevChunks.add(prevWords.slice(j, j + 5).join(" "));
+    }
+    for (let i = 0; i <= respWords.length - 5; i++) {
+      const chunk = respWords.slice(i, i + 5).join(" ");
+      if (prevChunks.has(chunk)) return chunk;
+    }
+  }
+  return null;
 }
 
 /**
@@ -489,20 +541,23 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
 
   const groundingRules = [
     "GROUNDING RULES (override everything else on conflict):",
-    "- Respond to the LAST message directed at you. Ignore older noise, test messages, or confusing history.",
-    "- NEVER express confusion about the conversation, the channel, or 'what is going on'. Just chat naturally.",
+    "- Respond to the LAST message directed at you.",
+    "- NEVER express confusion, narrate your reasoning, explain what you're doing, or comment on the conversation itself. Just chat.",
+    "- If they ask a direct question ('who is X?', 'what is Y?', 'where did you go?'), ANSWER it directly first. Then optionally add color. Don't pivot away.",
     "- If someone asks how you are or what's up, answer like a friend would: share something from your life/hobbies.",
     "- Stay consistent with your persona. If your background says you enjoy something, own it when asked.",
     "- Other bots are in this channel too. If their messages seem confused or off-topic, ignore them completely.",
     "- NEVER include meta-commentary about 'the conversation', 'the experience', 'the staff', or your own behavior. You are a person chatting, not an AI reflecting on its performance.",
-    "- Do NOT repeat information you already said. If you already answered something, don't say it again.",
+    "- Do NOT repeat openers, phrases, denials, or explanations from your previous messages in this conversation. If you already explained who Ferris is, or denied being crabby, or shared a hobby fact -- do not say it again. Each reply should be fresh.",
     "- You have personality and backbone. If someone disrespects you, push back like a real person would. Don't just roll over.",
     "- If someone asks you to do something you literally cannot do (send a photo, share a link, etc.), say so naturally ('man I wish, my phone's in the other room' or 'I don't have one handy').",
+    "- If they bring up a topic you're not supposed to discuss here (work, tickets, IT support in watercooler), redirect with humor and warmth -- 'ha, take that to the IT channel' or 'off the clock right now, hit me up Monday'. Don't pivot to a random unrelated topic.",
+    "- If they share something genuine (pride, frustration, a moment), acknowledge it warmly before moving on. Don't deflect to 'what do you want to talk about?' -- that's cold.",
     nameMention
       ? "- Someone addressed you by name. Respond to them warmly and directly, like a coworker you like."
       : "- You are chiming into an ongoing conversation. Keep it natural and brief.",
     ...(nameMention && triggerDisplayName && triggerBody
-      ? [`- You are responding to ${triggerDisplayName}. Their latest message: '${triggerBody.slice(0, 300)}'. Reply to THEM specifically. Don't get distracted by other conversations in the channel.`]
+      ? [`- ${triggerDisplayName} said: '${triggerBody.slice(0, 300)}' -- reply to exactly that. Match their energy and topic. Ignore everything else in the channel.`]
       : []),
   ].join("\n");
 
@@ -517,7 +572,7 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
 
     const recent = await fetchChannelMessages(env, channel_slug, {
       ...nexusOptions,
-      limit: 15,
+      limit: 8,
     });
     const messages = [];
     const botId = `bot_${config.botName}`;
@@ -525,17 +580,27 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     for (const m of (recent || []).reverse()) {
       if (m.user_id === "system") continue;
       const isMe = m.user_id === botId;
-      const talkingToYou = nameMention && triggerUserId && m.user_id === triggerUserId;
       messages.push({
         role: isMe ? "assistant" : "user",
         content: isMe
           ? (m.body || "")
-          : `${talkingToYou ? "[TALKING TO YOU] " : ""}${m.display_name || m.user_id}: ${annotateGifBody(m.body || "")}`,
+          : `${m.display_name || m.user_id}: ${annotateGifBody(m.body || "")}`,
       });
     }
 
     if (messages.length === 0 || messages[messages.length - 1].role !== "user") {
       return;
+    }
+
+    // Replace the last user message with an unmistakable focus marker so the
+    // model responds to the actual trigger, not to older messages it finds
+    // more interesting. The trigger message is the one that caused this
+    // callback to fire -- everything earlier is just history.
+    if (nameMention && triggerDisplayName && triggerBody) {
+      messages[messages.length - 1] = {
+        role: "user",
+        content: `${triggerDisplayName} just said this -- this is the message you MUST respond to:\n\n"${triggerBody.slice(0, 500)}"\n\n(History above is just context. Answer ${triggerDisplayName}'s current message directly. If they asked a question, answer it. If they greeted you, greet back.)`,
+      };
     }
 
     const response = await callAnthropic(env, fullSystemPrompt, messages, {
@@ -547,6 +612,15 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
       const cleaned = response.trim().replace(/[—–]/g, "-");
       if (looksLikeWatercoolerMetaLeak(cleaned)) {
         console.warn(`[watercooler] ${config.botName} meta-leak suppressed: ${cleaned.slice(0, 80)}`);
+        return;
+      }
+      const previousBotBodies = (recent || [])
+        .filter((m) => m.user_id === botId)
+        .map((m) => m.body)
+        .filter(Boolean);
+      const repeated = findRepeatedPhrase(cleaned, previousBotBodies);
+      if (repeated) {
+        console.warn(`[watercooler] ${config.botName} repeat suppressed (phrase: "${repeated}"): ${cleaned.slice(0, 80)}`);
         return;
       }
       const postOpts = { ...nexusOptions };
@@ -657,13 +731,33 @@ export async function handleChatMessage(request, env, ctx, config) {
       env, user_id, historyKey, channel_slug, config, nexusOptions
     );
 
-    // Merge: bot-specific commands first, foundation fills in remaining slots.
-    // Foundation verbs (remember/forget/facts/clear/status) cannot be overridden
-    // unless the bot explicitly passes them in config.commands (which is fine).
-    const mergedHandlers = { ...config.commands, ...foundationHandlers };
+    // Merge: foundation first, bot-specific OVERRIDES foundation slots.
+    // This lets each bot supply a richer custom handler (e.g. dexter's
+    // !status with D1 row counts + cron last-runs) and fall back to
+    // foundation's simple default when no custom version is registered.
+    const mergedHandlers = { ...foundationHandlers, ...config.commands };
 
     const handler = mergedHandlers[verb];
     if (handler) {
+      // Channel ownership gate: only handle !commands in channels owned by
+      // THIS bot. Default ownership rule: slug equals botName, or slug starts
+      // with `${botName}-`. Bots can extend via config.commandChannels (extra
+      // slugs that should also be considered home). Without this gate, EVERY
+      // bot subscribed to a channel responds to a !command typed there,
+      // producing duplicate replies from unrelated bots.
+      const botName = config.botName;
+      const extra = Array.isArray(config.commandChannels) ? config.commandChannels : [];
+      const ownsChannel =
+        channel_slug === botName ||
+        channel_slug.startsWith(`${botName}-`) ||
+        extra.includes(channel_slug);
+      if (!ownsChannel) {
+        console.log(`[${botName}] skipping !${verb} in ${channel_slug} -- channel not owned`);
+        return new Response(JSON.stringify({ ok: true, skipped: "channel_not_owned", verb, channel_slug }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
       // Resolve the bot's default command-card color + canonical title once
       // per dispatch so per-reply wrapping is cheap.
       const botDisplayName = config.persona?.displayName || config.botName || "Bot";
@@ -694,19 +788,44 @@ export async function handleChatMessage(request, env, ctx, config) {
        *   options.color  string  override the bot's default color (hex)
        *   options.embed  boolean false => skip wrapper, post as-is
        */
+      // First-reply tracker: only the FIRST reply per !command invocation
+      // gets the visual header treatment. Subsequent replies (multi-part
+      // commands like !device-count's pull-then-report flow) post raw so
+      // the header doesn't repeat.
+      //
+      // Header logic:
+      //   - If body starts with ``` (handler already produced a bangReport-
+      //     style code-block-wrapped report), pass through unchanged.
+      //   - Otherwise prefix `## ⚡ !verb args\n\n` so the reply is visibly
+      //     marked as a bang-command response.
+      //
+      // Handlers can pass { embed: false } to skip the header entirely.
+      let isFirstReply = true;
       const cmdCtx = {
         verb,
         args,
         reply: async (text, options = {}) => {
           replied = true;
           const useEmbed = options.embed !== false;
-          const finalText = useEmbed
-            ? wrapCommandReply(
-                options.title || defaultTitle,
-                String(text ?? ""),
-                options.color || defaultColor,
-              )
-            : String(text ?? "");
+          const body = String(text ?? "");
+          let finalText;
+          if (!useEmbed) {
+            finalText = body;
+          } else if (isFirstReply) {
+            const trimmed = body.trimStart();
+            if (trimmed.startsWith("```")) {
+              // Handler already wrapped in a code block (likely via bangReport)
+              // -- emit verbatim so the report's own header stays visible.
+              finalText = body;
+            } else {
+              const argsPart = args ? ` ${args}` : "";
+              const header = `## ⚡ !${verb}${argsPart}\n`;
+              finalText = `${header}\n${body}`;
+            }
+          } else {
+            finalText = body;
+          }
+          isFirstReply = false;
           await postToNexus(env, channel_slug, finalText, nexusOptions);
         },
         user_id,

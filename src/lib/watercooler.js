@@ -71,13 +71,20 @@ function mentionsOtherBot(body, botName) {
  * that bot post and now. No adjacency required -- interleaving messages
  * from other people do not break the conversation.
  *
+ * Suppression: if the user has named ANY OTHER bot in their messages
+ * since this bot's last post, the user is no longer talking to us --
+ * they've moved on. Return false so we don't dogpile messages clearly
+ * directed at someone else (e.g. user says "@courtney" then "hello?" --
+ * dexter must not claim "hello?" just because dexter spoke earlier).
+ *
  * @param {object[]} recent - messages newest-first
  * @param {string} botId - e.g. "bot_robert"
+ * @param {string} botName - e.g. "robert"
  * @param {string} userId - the human to check against
  * @param {number} now
  * @returns {boolean}
  */
-function isActiveConvo(recent, botId, userId, now) {
+function isActiveConvo(recent, botId, botName, userId, now) {
   // Find the bot's most recent post within the conversation window.
   let botPostIndex = -1;
   for (let i = 0; i < recent.length; i++) {
@@ -88,12 +95,17 @@ function isActiveConvo(recent, botId, userId, now) {
   }
   if (botPostIndex < 0) return false;
 
-  // Check if userId posted at least once between the bot's post and now
-  // (i.e. in the messages newer than the bot's post).
+  // Check messages newer than the bot's post.
+  let userPostedSince = false;
   for (let i = 0; i < botPostIndex; i++) {
-    if (recent[i].user_id === userId) return true;
+    if (recent[i].user_id === userId) {
+      userPostedSince = true;
+      // If the user named a different bot in any post-our-reply message,
+      // they've redirected -- we are no longer in active conversation.
+      if (mentionsOtherBot(recent[i].body || "", botName)) return false;
+    }
   }
-  return false;
+  return userPostedSince;
 }
 
 /**
@@ -105,7 +117,7 @@ function isActiveConvo(recent, botId, userId, now) {
  * @param {number} now
  * @returns {string|null}
  */
-function findActiveConvoPartner(recent, botId, now) {
+function findActiveConvoPartner(recent, botId, botName, now) {
   // Find the bot's most recent post within the conversation window.
   let botPostIndex = -1;
   for (let i = 0; i < recent.length; i++) {
@@ -117,9 +129,13 @@ function findActiveConvoPartner(recent, botId, now) {
   if (botPostIndex < 0) return null;
 
   // Walk messages newer than the bot's post to find a human who replied.
+  // Skip humans whose post addressed a different bot (they've moved on).
   for (let i = botPostIndex - 1; i >= 0; i--) {
     const uid = recent[i].user_id;
-    if (uid && !uid.startsWith("bot_") && uid !== "system") return uid;
+    if (uid && !uid.startsWith("bot_") && uid !== "system") {
+      if (mentionsOtherBot(recent[i].body || "", botName)) continue;
+      return uid;
+    }
   }
   return null;
 }
@@ -149,7 +165,7 @@ export async function shouldChimeIn(env, botName, channelSlug, body, nexusOption
   const botId = `bot_${botName}`;
 
   const addressesOther = mentionsOtherBot(body, botName);
-  const inConvo = userId && !addressesOther && isActiveConvo(recent, botId, userId, now);
+  const inConvo = userId && !addressesOther && isActiveConvo(recent, botId, botName, userId, now);
   const directlyAddressed = named || inConvo;
 
   // Active-conversation suppression: if this bot is mid-conversation with
@@ -157,7 +173,7 @@ export async function shouldChimeIn(env, botName, channelSlug, body, nexusOption
   // a direct name-mention, suppress ambient chime-in so the bot stays
   // focused on its current conversation partner.
   if (!named && userId) {
-    const partner = findActiveConvoPartner(recent, botId, now);
+    const partner = findActiveConvoPartner(recent, botId, botName, now);
     if (partner && partner !== userId) {
       return { respond: false, reason: "active conversation with someone else" };
     }
@@ -176,7 +192,15 @@ export async function shouldChimeIn(env, botName, channelSlug, body, nexusOption
   }
 
   // Tier 0: active conversation continuation
+  // Cross-bot guard: if another bot just spoke and the user didn't name us,
+  // yield. Prevents two bots dogpiling the same follow-up message.
   if (inConvo) {
+    for (const m of recent) {
+      const uid = m.user_id || "";
+      if (uid !== botId && uid.startsWith("bot_") && now - m.created_at < CROSS_BOT_GUARD_MS) {
+        return { respond: false, reason: "another bot just spoke (Tier 0 yield)" };
+      }
+    }
     return { respond: true, reason: "active conversation", nameMention: true };
   }
 

@@ -71,7 +71,10 @@ export async function postApprovalCard(env, params, options = {}) {
   const approvalSlug = options.approvalSlug;
   const dbKey = options.dbBinding || DEFAULT_DB_BINDING;
   const callbackUrl = `${resolveWorkerBase(env, options)}/api/internal/button-click`;
-  const nexusOptions = { nexusKeyEnvVar: options.nexusKeyEnvVar };
+  const nexusOptions = {
+    nexusKeyEnvVar: options.nexusKeyEnvVar,
+    provenance: "hitl-approval",
+  };
 
   // ---- Chat HITL path (action block from Claude) ----------------------------
   if (params.action) {
@@ -208,7 +211,10 @@ export async function processButtonClick(env, payload, options = {}) {
 
   const approvalSlug = options.approvalSlug;
   const dbKey = options.dbBinding || DEFAULT_DB_BINDING;
-  const nexusOptions = { nexusKeyEnvVar: options.nexusKeyEnvVar };
+  const nexusOptions = {
+    nexusKeyEnvVar: options.nexusKeyEnvVar,
+    provenance: "hitl-approval",
+  };
 
   const { message_id, button_id, user_id, display_name } = payload || {};
 

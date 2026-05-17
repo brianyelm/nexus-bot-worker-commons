@@ -422,3 +422,64 @@ export function wrapCommandReply(title, rawText, color) {
 
   return asRichEmbedCard({ title, color: safeColor, body, fields, footer });
 }
+
+// ─── bangReport: dexter device-count style structured plain-text report ───────
+//
+// Produces a code-block-wrapped report with:
+//   {Bot} !{verb} [-- args]
+//   Generated: {ISO timestamp}
+//   ====================================== (72-wide)
+//   {section 1 body}
+//
+//   -------------------------------------- (72-wide)
+//   {section 2 body}
+//   ...
+//
+// The whole report is wrapped in ``` so Nexus applies syntax highlighting
+// inside the code block (numbers / strings / keywords get color treatment).
+//
+// Handlers shape sections however they want. Suggested conventions:
+//   - First line of section is the heading ("NinjaOne org: ..." or "## NinjaOne")
+//   - Body lines indented 2 spaces under the heading
+//   - Use ` -- {label} ({count}) -- ` subheadings for nested lists
+//
+// Sections is an array of strings (each with embedded newlines) OR an array
+// of arrays of strings (per-section line arrays, joined with \n).
+
+const REPORT_WIDTH = 72;
+const HEADER_RULE = "=".repeat(REPORT_WIDTH);
+const SECTION_RULE = "-".repeat(REPORT_WIDTH);
+
+/**
+ * Build a dexter-style structured plain-text report wrapped in a code block.
+ *
+ * @param {object} opts
+ * @param {string} opts.botName - "Dexter" / "Jacob" / etc. (first word of display name).
+ * @param {string} opts.verb - bang command verb without leading !
+ * @param {string} [opts.args] - args string from the command invocation
+ * @param {Array<string|string[]>} opts.sections - per-section body (string or array of lines)
+ * @param {string} [opts.subtitle] - optional override for the title line; default `${botName} !${verb}{ -- args}`
+ * @returns {string} markdown-ready report (code-block wrapped)
+ */
+export function bangReport({ botName, verb, args, sections, subtitle } = {}) {
+  const argsPart = args ? ` -- ${args}` : "";
+  const title = subtitle || `${botName} !${verb}${argsPart}`;
+  const out = [
+    title,
+    `Generated: ${new Date().toISOString()}`,
+    HEADER_RULE,
+  ];
+  const list = Array.isArray(sections) ? sections : [];
+  for (let i = 0; i < list.length; i++) {
+    if (i > 0) {
+      out.push("");
+      out.push(SECTION_RULE);
+    }
+    const s = list[i];
+    if (Array.isArray(s)) out.push(s.join("\n"));
+    else if (typeof s === "string") out.push(s);
+  }
+  return "```\n" + out.join("\n") + "\n```";
+}
+
+export const BANG_REPORT_RULES = { HEADER_RULE, SECTION_RULE };
