@@ -113,7 +113,7 @@ export async function reportFleetError(env, { bot, op, msg, ctx } = {}, options 
       ? `\u{1F534} **${botName}** · \`${opStr}\` · ${msgStr}\nctx: ${ctxStr}`
       : `\u{1F534} **${botName}** · \`${opStr}\` · ${msgStr}`;
 
-    await postToNexus(env, FLEET_ERRORS_SLUG, body, options);
+    await postToNexus(env, FLEET_ERRORS_SLUG, body, { provenance: "system-alert", ...options });
   } catch (err) {
     // Swallow unconditionally — this is the error reporter itself.
     console.error("[fleetError] reportFleetError itself failed:", err?.message);
