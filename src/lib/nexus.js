@@ -32,6 +32,8 @@
 // are expected noise during brief outages and must stay silent.
 // =============================================================================
 
+import { getProvenanceContext } from "./provenanceContext.js";
+
 // Lazy import to avoid circular dependency: fleetError imports postToNexus,
 // so we must not import at module load time (CF Workers module-scope I/O ban
 // and circular dep risk). We inline a dynamic import wrapper instead.
