@@ -39,16 +39,7 @@ export { postApprovalCard, processButtonClick } from "./lib/hitl.js";
 export { makeShouldRespond } from "./lib/triggers.js";
 export { shouldChimeIn } from "./lib/watercooler.js";
 export {
-  asEmbedCard,
-  asRichEmbedCard,
   safeEmbedTitle,
-  parseMultiSection,
-  wrapCommandReply,
-  prettifyVerb,
-  buildCommandTitle,
-  colorForBot,
-  BOT_COMMAND_COLORS,
-  DEFAULT_COMMAND_COLOR,
   bangReport,
   bangAlert,
   BANG_REPORT_RULES,
