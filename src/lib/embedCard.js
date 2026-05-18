@@ -483,3 +483,32 @@ export function bangReport({ botName, verb, args, sections, subtitle } = {}) {
 }
 
 export const BANG_REPORT_RULES = { HEADER_RULE, SECTION_RULE };
+
+/**
+ * bangAlert — non-command variant of bangReport for cron jobs, pollers, and
+ * webhook handlers. Same output shape as bangReport (code-block-wrapped,
+ * 72-wide rules, sections) but the title line is "Botname verb" (no leading
+ * `!`), since the post isn't the response to a chat command.
+ *
+ * The fleet-wide format mandate (2026-05-17): every cron/handler post uses
+ * this instead of asRichEmbedCard. Left-border color comes from the
+ * message's provenance slug at the renderer level; the bot does not pick
+ * a color here.
+ *
+ * @param {object} opts
+ * @param {string} opts.botName - "Courtney" / "Dexter" / etc.
+ * @param {string} opts.verb - kind of post (e.g. "ticket-alert", "uptime-alert")
+ * @param {string} [opts.args] - optional args string appended after `--`
+ * @param {Array<string|string[]>} opts.sections - per-section body
+ * @returns {string} code-block-wrapped report ready to pass to postToNexus
+ */
+export function bangAlert({ botName, verb, args, sections } = {}) {
+  const argsPart = args ? ` -- ${args}` : "";
+  return bangReport({
+    botName,
+    verb,
+    args,
+    sections,
+    subtitle: `${botName} ${verb}${argsPart}`,
+  });
+}

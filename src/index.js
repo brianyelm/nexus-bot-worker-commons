@@ -50,6 +50,7 @@ export {
   BOT_COMMAND_COLORS,
   DEFAULT_COMMAND_COLOR,
   bangReport,
+  bangAlert,
   BANG_REPORT_RULES,
 } from "./lib/embedCard.js";
 export { buildAttachmentContentBlocks } from "./lib/attachments.js";

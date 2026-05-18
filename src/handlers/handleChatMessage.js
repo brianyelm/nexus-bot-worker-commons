@@ -39,7 +39,7 @@ import { callAnthropicWithTools, callAnthropic } from "../lib/anthropic.js";
 import { postToNexus, sendTyping, fetchChannelMessages } from "../lib/nexus.js";
 import { postApprovalCard } from "../lib/hitl.js";
 import { withProvenance } from "../lib/provenanceContext.js";
-import { asEmbedCard, wrapCommandReply, buildCommandTitle, colorForBot, bangReport } from "../lib/embedCard.js";
+import { bangReport } from "../lib/embedCard.js";
 import { buildAttachmentContentBlocks } from "../lib/attachments.js";
 import { shouldChimeIn } from "../lib/watercooler.js";
 
@@ -759,69 +759,49 @@ export async function handleChatMessage(request, env, ctx, config) {
           headers: { "Content-Type": "application/json" },
         });
       }
-      // Resolve the bot's default command-card color + canonical title once
-      // per dispatch so per-reply wrapping is cheap.
+      // Bot display name drives the bangReport title line. Per-row colors
+      // were removed 2026-05-17 -- the renderer paints left-border from
+      // msg.provenance, not from anything the bot computes.
       const botDisplayName = config.persona?.displayName || config.botName || "Bot";
-      const defaultColor = config.commandColor || colorForBot(config.botName);
-      // Per-bot verb -> title override map (config.commandTitles) lets each
-      // worker spell its help/status cards naturally ("SOC Commands" instead
-      // of just "Help") while every other verb falls back to the canonical
-      // "<Bot> -- <Verb>" shape.
-      const titleOverride = config.commandTitles && config.commandTitles[verb];
-      const defaultTitle = titleOverride
-        ? `${botDisplayName} -- ${titleOverride}`
-        : buildCommandTitle(botDisplayName, verb);
 
       let replied = false;
       /**
-       * Wrap a command reply in a Nexus rich-embed card unless the caller opts
-       * out. Multi-section replies (separated by =====/-----  or -- Title --
-       * lines) are parsed into fields[]; single-section replies go into body.
-       * A [time:UNIX_MS] footer is appended on every embed for the TZ-aware
-       * timestamp pill.
+       * Wrap the FIRST reply of a !command in a bangReport so every bot's
+       * command output renders as the same monospace code-block format
+       * (the "Dexter !status" look). Subsequent replies in the same
+       * dispatch post raw so the title line doesn't repeat. The renderer
+       * paints the left-border accent from msg.provenance (user-command =
+       * green) -- the bot does not pick a color here.
        *
-       * Handlers can override the title and color per-call (useful for
-       * severity-tinted !status output) or pass embed:false to emit a raw chat
-       * reply that bypasses the visual treatment entirely.
-       *
-       * Signature: reply(text, options?)
-       *   options.title  string  override the auto-derived title
-       *   options.color  string  override the bot's default color (hex)
-       *   options.embed  boolean false => skip wrapper, post as-is
+       * Handlers can pass { embed: false } as a legacy escape hatch to
+       * emit raw text bypassing the bangReport wrap. Pre-2026-05-17 callers
+       * that produced their own bangReport (handler body starts with ```)
+       * still pass through verbatim so we don't double-wrap.
        */
-      // First-reply tracker: only the FIRST reply per !command invocation
-      // gets the visual header treatment. Subsequent replies (multi-part
-      // commands like !device-count's pull-then-report flow) post raw so
-      // the header doesn't repeat.
-      //
-      // Header logic:
-      //   - If body starts with ``` (handler already produced a bangReport-
-      //     style code-block-wrapped report), pass through unchanged.
-      //   - Otherwise prefix `## ⚡ !verb args\n\n` so the reply is visibly
-      //     marked as a bang-command response.
-      //
-      // Handlers can pass { embed: false } to skip the header entirely.
       let isFirstReply = true;
+      const botFirstWord = String(botDisplayName || "Bot").split(/\s+/)[0];
       const cmdCtx = {
         verb,
         args,
         reply: async (text, options = {}) => {
           replied = true;
-          const useEmbed = options.embed !== false;
+          const useWrap = options.embed !== false;
           const body = String(text ?? "");
           let finalText;
-          if (!useEmbed) {
+          if (!useWrap) {
             finalText = body;
           } else if (isFirstReply) {
             const trimmed = body.trimStart();
             if (trimmed.startsWith("```")) {
-              // Handler already wrapped in a code block (likely via bangReport)
-              // -- emit verbatim so the report's own header stays visible.
+              // Handler already produced a bangReport -- emit verbatim.
               finalText = body;
             } else {
-              const argsPart = args ? ` ${args}` : "";
-              const header = `## ⚡ !${verb}${argsPart}\n`;
-              finalText = `${header}\n${body}`;
+              finalText = bangReport({
+                botName: botFirstWord,
+                verb,
+                args,
+                sections: [body],
+              });
             }
           } else {
             finalText = body;
@@ -848,13 +828,17 @@ export async function handleChatMessage(request, env, ctx, config) {
           } catch (err) {
             console.error(`[handleChatMessage] command error !${verb}:`, err.message);
             if (!replied) {
-              // Surface command errors as a wrapped card so the visual
-              // contract holds even when a handler throws.
-              const errBody = `Command error: ${err.message}`;
+              // Surface command errors as a bangReport so the visual contract
+              // holds even when a handler throws.
               await postToNexus(
                 env,
                 channel_slug,
-                wrapCommandReply(`${botDisplayName} -- Error`, errBody, defaultColor),
+                bangReport({
+                  botName: botFirstWord,
+                  verb,
+                  args,
+                  sections: [`Command error: ${err.message}`],
+                }),
                 nexusOptions,
               ).catch(() => {});
             }
