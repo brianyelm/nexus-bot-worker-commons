@@ -57,7 +57,7 @@ function annotateGifBody(body) {
 }
 
 // Foundation command verbs built per-request (need env + user context)
-const FOUNDATION_VERBS = new Set(["remember", "forget", "facts", "clear", "status"]);
+const FOUNDATION_VERBS = new Set(["remember", "forget", "facts", "clear", "status", "fleet"]);
 
 /**
  * Strip only this bot's own @mention token(s) from the message body.
@@ -190,6 +190,79 @@ function buildFoundationHandlers(env, userId, historyKey, channel_slug, config, 
         verb: cmdCtx.verb,
         args: cmdCtx.args,
         sections: [body],
+      }));
+    },
+
+    fleet: async (cmdCtx) => {
+      const displayName = (config.persona?.displayName || botName).split(/\s+/)[0];
+      const apiKey = env[config.nexusKeyEnvVar];
+      if (!apiKey || !env.NEXUS_BASE_URL) {
+        await cmdCtx.reply(bangReport({
+          botName: displayName,
+          verb: cmdCtx.verb,
+          args: cmdCtx.args,
+          sections: ["Cannot query fleet: NEXUS_BASE_URL or bot key not set."],
+        }));
+        return;
+      }
+      let bots = [];
+      let generatedAt = null;
+      let fetchErr = null;
+      try {
+        const res = await fetch(`${env.NEXUS_BASE_URL}/api/bot/fleet/status`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!res.ok) {
+          const txt = await res.text().catch(() => "");
+          fetchErr = `HTTP ${res.status}: ${txt.slice(0, 200)}`;
+        } else {
+          const j = await res.json();
+          bots = j?.data?.bots || [];
+          generatedAt = j?.data?.generated_at || null;
+        }
+      } catch (err) {
+        fetchErr = err?.message || String(err);
+      }
+      if (fetchErr) {
+        await cmdCtx.reply(bangReport({
+          botName: displayName,
+          verb: cmdCtx.verb,
+          args: cmdCtx.args,
+          sections: [`Fleet status fetch failed: ${fetchErr}`],
+        }));
+        return;
+      }
+      // Build a pm2-style table:
+      //   Status  Bot        Commit    Deployed                  Latency
+      const header = "Status  Bot          Commit    Deployed                 Latency";
+      const sep = "-".repeat(header.length);
+      const rows = bots.map((b) => {
+        const ok = b.health_ok && b.version_ok && !b.error;
+        const status = ok ? "  OK  " : " FAIL ";
+        const name = String(b.name || "").padEnd(11);
+        const commit = (b.commit ? String(b.commit) : "--------").slice(0, 8);
+        const deployedRaw = b.deployed_at ? String(b.deployed_at) : "(unknown)";
+        const deployed = deployedRaw.padEnd(24).slice(0, 24);
+        const ms = String(b.latency_ms ?? 0).padStart(4) + "ms";
+        return `${status}  ${name} ${commit}  ${deployed}  ${ms}`;
+      });
+      const errLines = bots
+        .filter((b) => b.error || !b.health_ok || !b.version_ok)
+        .map((b) => `  ${b.name}: ${b.error || `health=${b.health_status} version_ok=${b.version_ok}`}`);
+      const sections = [
+        `Generated at: ${generatedAt || "(now)"}`,
+        "",
+        header,
+        sep,
+        ...rows,
+      ];
+      if (errLines.length > 0) sections.push("", "Issues:", ...errLines);
+      await cmdCtx.reply(bangReport({
+        botName: displayName,
+        verb: cmdCtx.verb,
+        args: cmdCtx.args,
+        sections: [sections.join("\n")],
       }));
     },
   };
