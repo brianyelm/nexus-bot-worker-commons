@@ -253,7 +253,15 @@ async function runLlmPipeline({
             .filter((m) => m.user_id !== "system")
             .map((m) => {
               const who = m.display_name || m.user_id;
-              const ts = m.created_at ? m.created_at.slice(11, 16) : "";
+              // Nexus returns created_at as a number (epoch ms) since the
+              // schema column is INTEGER; older code paths returned ISO
+              // strings. Accept both so this never blows up the channel
+              // context fetch on a string/number mismatch.
+              let ts = "";
+              if (m.created_at !== undefined && m.created_at !== null) {
+                const d = new Date(m.created_at);
+                if (!Number.isNaN(d.getTime())) ts = d.toISOString().slice(11, 16);
+              }
               const body = (m.body || "").slice(0, 300);
               return `[${ts}] ${who}: ${body}`;
             });
