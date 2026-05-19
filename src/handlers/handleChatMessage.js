@@ -250,13 +250,8 @@ function buildFoundationHandlers(env, userId, historyKey, channel_slug, config, 
       const errLines = bots
         .filter((b) => b.error || !b.health_ok || !b.version_ok)
         .map((b) => `  ${b.name}: ${b.error || `health=${b.health_status} version_ok=${b.version_ok}`}`);
-      const sections = [
-        `Generated at: ${generatedAt || "(now)"}`,
-        "",
-        header,
-        sep,
-        ...rows,
-      ];
+      // bangReport already emits its own "Generated:" line; skip duplicating it.
+      const sections = [header, sep, ...rows];
       if (errLines.length > 0) sections.push("", "Issues:", ...errLines);
       await cmdCtx.reply(bangReport({
         botName: displayName,
