@@ -3,6 +3,10 @@
 //
 // Provides:
 //   postToNexus(env, slug, content, [options])      - POST markdown to a channel
+//                                                     (auto-switches to channel-gated
+//                                                     Bearer route when attachment_ids
+//                                                     supplied so images render inline)
+//   uploadBotAttachment(env, bytes, filename, mime, [options]) - upload file, get id
 //   attachButtons(env, messageId, buttons, [options]) - attach interactive buttons
 //   sendNexusHeartbeat(env, [meta], [options])       - heartbeat ping
 //   sendTyping(env, slug, action, [options])        - "<bot> is typing..." indicator
@@ -162,7 +166,13 @@ async function _bearerPost(url, body, apiKey) {
 
 /**
  * Post a markdown message to a Nexus channel by slug.
- * Uses POST /api/bot/messages (the X-API-Key bot endpoint).
+ *
+ * Default path: POST /api/bot/messages (the X-API-Key bot endpoint).
+ * When options.attachment_ids is supplied, switches to the channel-gated
+ * Bearer route POST /api/bot/channels/:slug/messages so the file(s) render
+ * inline in the channel. The attachment_ids must come from a prior
+ * uploadBotAttachment() call by the same bot.
+ *
  * Content is truncated to 8000 chars defensively.
  *
  * @param {object} env
@@ -170,6 +180,7 @@ async function _bearerPost(url, body, apiKey) {
  * @param {string} content - markdown body
  * @param {object} [options]
  * @param {string} [options.nexusKeyEnvVar] - env var name holding the API key
+ * @param {string[]} [options.attachment_ids] - attachment ids from uploadBotAttachment
  * @returns {Promise<object|null>} Nexus message object with .id, or null on error
  */
 export async function postToNexus(env, slug, content, options = {}) {
@@ -179,8 +190,27 @@ export async function postToNexus(env, slug, content, options = {}) {
     return null;
   }
   const body = typeof content === "string" ? content.slice(0, 8000) : String(content).slice(0, 8000);
+  const attachmentIds = Array.isArray(options.attachment_ids) && options.attachment_ids.length > 0
+    ? options.attachment_ids
+    : null;
+
   try {
     const provenance = options.provenance ?? getProvenanceContext() ?? null;
+
+    if (attachmentIds) {
+      // Channel-gated Bearer route. Required for attachments; provenance mandatory.
+      const payload = { body, attachment_ids: attachmentIds };
+      if (options.reply_to) payload.reply_to = options.reply_to;
+      payload.provenance = provenance || "scheduled-cron";
+      const result = await _bearerPost(
+        `${env.NEXUS_BASE_URL}/api/bot/channels/${encodeURIComponent(slug)}/messages`,
+        payload,
+        apiKey,
+      );
+      pingBotPresence(env, options).catch(() => {});
+      return result?.data || null;
+    }
+
     const payload = { channel_slug: slug, body };
     if (options.reply_to) payload.reply_to = options.reply_to;
     if (provenance) payload.provenance = provenance;
@@ -194,6 +224,75 @@ export async function postToNexus(env, slug, content, options = {}) {
     return result?.data || null;
   } catch (err) {
     console.warn(`[nexus] postToNexus(${slug}) failed:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Upload bytes as an attachment owned by this bot, return the attachment id.
+ *
+ * Hits POST /api/bot/attachments (Bearer auth, multipart/form-data). Returns
+ * the new attachment id, which can be passed to postToNexus(..., { attachment_ids })
+ * so the message renders the image/file inline.
+ *
+ * Max size: 25 MiB (server-enforced). Caller should chunk or downscale before
+ * calling for large media. PNG/JPEG/GIF/WEBP/PDF render inline in the Nexus UI;
+ * other mimes display as a download link.
+ *
+ * @param {object} env
+ * @param {Uint8Array | ArrayBuffer | Blob} bytes - file contents
+ * @param {string} filename - display filename (e.g. "morphora-quote-card.png")
+ * @param {string} mime - mime type (e.g. "image/png")
+ * @param {object} [options]
+ * @param {string} [options.nexusKeyEnvVar] - env var name holding the API key
+ * @returns {Promise<string|null>} attachment id, or null on error
+ */
+export async function uploadBotAttachment(env, bytes, filename, mime, options = {}) {
+  const apiKey = resolveNexusKey(env, options);
+  if (!apiKey || !env.NEXUS_BASE_URL) {
+    console.warn("[nexus] uploadBotAttachment: missing API key or NEXUS_BASE_URL");
+    return null;
+  }
+  if (!bytes || !filename) {
+    console.warn("[nexus] uploadBotAttachment: bytes + filename required");
+    return null;
+  }
+
+  const blob = bytes instanceof Blob
+    ? bytes
+    : new Blob([bytes], { type: mime || "application/octet-stream" });
+
+  const form = new FormData();
+  form.append("file", blob, filename);
+
+  try {
+    const res = await fetch(`${env.NEXUS_BASE_URL}/api/bot/attachments`, {
+      method: "POST",
+      headers: { "Authorization": `Bearer ${apiKey}` },
+      body: form,
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.warn(`[nexus] uploadBotAttachment(${filename}) -> ${res.status}: ${text}`);
+      _getReportFleetError().then(fn => fn(env, {
+        bot: deriveBotName(env, options),
+        op: "uploadBotAttachment",
+        msg: `HTTP ${res.status}: ${text.slice(0, 120)}`,
+        ctx: { filename, mime, size: blob.size },
+      }, options)).catch(() => {});
+      return null;
+    }
+    const j = await res.json().catch(() => ({}));
+    return j?.data?.id || null;
+  } catch (err) {
+    console.warn(`[nexus] uploadBotAttachment(${filename}) failed:`, err.message);
+    _getReportFleetError().then(fn => fn(env, {
+      bot: deriveBotName(env, options),
+      op: "uploadBotAttachment",
+      msg: err.message,
+      ctx: { filename, mime },
+    }, options)).catch(() => {});
     return null;
   }
 }
