@@ -816,15 +816,23 @@ export async function handleChatMessage(request, env, ctx, config) {
 
     const handler = mergedHandlers[verb];
     if (handler) {
-      // Channel ownership gate: only handle !commands in channels owned by
-      // THIS bot. Default ownership rule: slug equals botName, or slug starts
-      // with `${botName}-`. Bots can extend via config.commandChannels (extra
-      // slugs that should also be considered home). Without this gate, EVERY
-      // bot subscribed to a channel responds to a !command typed there,
-      // producing duplicate replies from unrelated bots.
+      // Channel ownership / explicit-address gate:
+      //   1. trigger_type==="mention" -- user @-mentioned THIS bot explicitly,
+      //      so they clearly want this bot to handle the !cmd no matter the
+      //      channel. (Only the mentioned bot receives a "mention" callback,
+      //      so this doesn't cause duplicate replies from other ambient bots.)
+      //   2. Channel name matches botName or starts with `${botName}-`, or is
+      //      listed in config.commandChannels.
+      // The ownership-only gate was producing dead silence when users typed
+      // "@<bot> !fleet" (or any !cmd) in a general-purpose channel, since
+      // every bot would skip with "channel not owned". Bypass on explicit
+      // mention restores the natural UX without re-introducing fleet-wide
+      // ambient duplicate replies.
       const botName = config.botName;
       const extra = Array.isArray(config.commandChannels) ? config.commandChannels : [];
+      const explicitlyMentioned = trigger_type === "mention";
       const ownsChannel =
+        explicitlyMentioned ||
         channel_slug === botName ||
         channel_slug.startsWith(`${botName}-`) ||
         extra.includes(channel_slug);
