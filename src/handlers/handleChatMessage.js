@@ -331,7 +331,15 @@ async function runLlmPipeline({
                 if (!Number.isNaN(d.getTime())) ts = d.toISOString().slice(11, 16);
               }
               const body = (m.body || "").slice(0, 300);
-              return `[${ts}] ${who}: ${body}`;
+              // Surface attachment metadata so the bot can see "Dirk posted
+              // Nexus-Install-Guide.pdf earlier" instead of just the text.
+              // Carries the attachment id so the bot can fetch it via the
+              // nexus_load_attachment tool.
+              const atts = Array.isArray(m.attachments) ? m.attachments : [];
+              const attSuffix = atts.length
+                ? ` [attachments: ${atts.map((a) => `${a.filename || a.id} (${a.mime_type || "?"}, id=${a.id})`).join(", ")}]`
+                : "";
+              return `[${ts}] ${who}: ${body}${attSuffix}`;
             });
           if (lines.length > 0) {
             channelContextBlock =
@@ -420,15 +428,119 @@ async function runLlmPipeline({
         channel: slug,
         count: msgs.length,
         messages: msgs.map((m) => ({
+          message_id: m.id,
           author: m.display_name || m.user_id,
           body: annotateGifBody((m.body || "").slice(0, 500)),
           timestamp: m.created_at,
+          attachments: Array.isArray(m.attachments)
+            ? m.attachments.map((a) => ({
+                id: a.id,
+                filename: a.filename,
+                mime_type: a.mime_type,
+                size_bytes: a.size_bytes,
+              }))
+            : [],
         })),
       };
     };
 
-    const mergedTools = [...(config.tools.definitions || []), channelHistoryTool];
-    const mergedHandlers = { ...(config.tools.handlers || {}), read_channel_history: channelHistoryHandler };
+    const loadAttachmentTool = {
+      name: "nexus_load_attachment",
+      description:
+        "Load the content of a file that was attached to a previous Nexus message " +
+        "(an attachment from the RECENT CHANNEL MESSAGES context block, or from the " +
+        "read_channel_history tool). Use this when the user references a file from an " +
+        "earlier turn that you need to read. PDFs return extracted markdown text. " +
+        "Images return a short description. Returns 'error' on unsupported types or " +
+        "when credentials are missing.",
+      input_schema: {
+        type: "object",
+        properties: {
+          attachment_id: {
+            type: "string",
+            description:
+              "The attachment id (uuid) from a recent channel message. Listed in the " +
+              "RECENT CHANNEL MESSAGES context block as `(id=<uuid>)` and in the " +
+              "read_channel_history tool result under `attachments[].id`.",
+          },
+          purpose: {
+            type: "string",
+            description:
+              "Optional. What you intend to use the content for (e.g. 'create KB article', " +
+              "'summarize for ticket'). Steers the extraction prompt.",
+          },
+        },
+        required: ["attachment_id"],
+      },
+    };
+    const loadAttachmentHandler = async (input) => {
+      const id = input?.attachment_id;
+      if (!id || typeof id !== "string") return { error: "attachment_id is required" };
+      const token = env.NEXUS_INTERNAL_TOKEN || env.INTERNAL_ADMIN_TOKEN;
+      const baseUrl = env.NEXUS_BASE_URL;
+      if (!token || !baseUrl) {
+        return { error: "Bot worker is missing NEXUS_INTERNAL_TOKEN; ask Brian to set the secret." };
+      }
+      let resp;
+      try {
+        resp = await fetch(`${baseUrl.replace(/\/$/, "")}/api/internal/attachments/${encodeURIComponent(id)}`, {
+          method: "GET",
+          headers: { "X-Internal-Token": token },
+          signal: AbortSignal.timeout(20000),
+        });
+      } catch (err) {
+        return { error: `Fetch failed: ${err?.message || String(err)}` };
+      }
+      if (!resp.ok) {
+        return { error: `Nexus returned HTTP ${resp.status} for attachment ${id}.` };
+      }
+      const mime = (resp.headers.get("content-type") || "").toLowerCase().split(";")[0].trim();
+      const buf = await resp.arrayBuffer();
+      if (buf.byteLength > 10 * 1024 * 1024) {
+        return { error: `Attachment ${id} is ${buf.byteLength} bytes; over 10 MB cap.` };
+      }
+      const bytes = new Uint8Array(buf);
+      const CHUNK = 0x8000;
+      let binary = "";
+      for (let i = 0; i < bytes.length; i += CHUNK) {
+        binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + CHUNK, bytes.length)));
+      }
+      const b64 = btoa(binary);
+
+      const isPdf = mime === "application/pdf";
+      const isImage = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"].includes(mime);
+      if (!isPdf && !isImage) {
+        return { error: `Unsupported mime ${mime || "?"} for in-conversation load.` };
+      }
+
+      const purpose = input?.purpose ? String(input.purpose).slice(0, 200) : "general reference";
+      const extractionPrompt = isPdf
+        ? `Extract the full content of this PDF as well-structured markdown. Preserve headings, lists, tables, and code blocks. Include EVERY section verbatim where reasonable; do not summarize. Intended use: ${purpose}.`
+        : `Describe this image in detail. Include all visible text verbatim (OCR), any diagrams, UI elements, or data. Intended use: ${purpose}.`;
+
+      const block = isPdf
+        ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
+        : { type: "image", source: { type: "base64", media_type: mime, data: b64 } };
+
+      try {
+        const extracted = await callAnthropic(
+          env,
+          "You are an extraction assistant. Return ONLY the requested content, no preamble.",
+          [{ role: "user", content: [block, { type: "text", text: extractionPrompt }] }],
+          { maxTokens: 8000 },
+        );
+        return { ok: true, mime, bytes: buf.byteLength, content: extracted };
+      } catch (err) {
+        return { error: `Extraction failed: ${err?.message || String(err)}` };
+      }
+    };
+
+    const mergedTools = [...(config.tools.definitions || []), channelHistoryTool, loadAttachmentTool];
+    const mergedHandlers = {
+      ...(config.tools.handlers || {}),
+      read_channel_history: channelHistoryHandler,
+      nexus_load_attachment: loadAttachmentHandler,
+    };
 
     responseText = await callAnthropicWithTools(
       env,
