@@ -703,6 +703,31 @@ export async function runLlmPipeline({
     } catch (err) {
       console.error("[handleChatMessage] nexus post error:", err.message);
     }
+
+    // Auto-listen: if the bot just asked a question, register a short-lived
+    // "expecting reply" flag in KV so the next ambient message in this channel
+    // is treated as directed at this bot without the user needing to re-@
+    // anyone. Brian called this out 2026-05-20: having to @<bot> after every
+    // turn is annoying when the bot itself just asked a follow-up.
+    // TTL 10 min. One-shot: consumed on the next inbound ambient message.
+    // Detect `?` followed by whitespace or end-of-string so query-string `?`
+    // inside URLs (https://x.com/?q=foo) doesn't false-positive.
+    if (/\?[!.)\]]*(\s|$)/.test(visibleResponse)) {
+      const cacheBinding = config.cacheBinding || "CACHE";
+      const cache = env[cacheBinding];
+      if (cache && typeof cache.put === "function") {
+        try {
+          const key = `bot_listening:${config.botName}:${channel_slug}`;
+          await cache.put(
+            key,
+            JSON.stringify({ since: Date.now(), asked_user_id: user_id }),
+            { expirationTtl: 600 },
+          );
+        } catch (err) {
+          console.warn(`[handleChatMessage] auto-listen KV put failed: ${err?.message}`);
+        }
+      }
+    }
   }
 }
 
@@ -1127,10 +1152,48 @@ export async function handleChatMessage(request, env, ctx, config) {
 
   // ---- 7b. Ambient gate (checked AFTER !cmd so explicit commands always pass) -
   if (trigger_type === "ambient") {
-    const ambientFn = config.triggers?.ambient;
-    const meta = { attachments: Array.isArray(attachments) ? attachments : [] };
-    if (ambientFn && !ambientFn(msgBody || "", reply_to ?? null, null, meta)) {
-      return json({ success: true, skipped: true });
+    // Auto-listen bypass: if this bot recently posted a question in this
+    // channel, treat the next inbound ambient message as directed at the
+    // bot. KV key `bot_listening:<botName>:<channel_slug>` is set in
+    // runLlmPipeline post-reply when the bot's response contains `?`.
+    // Skip when (a) the author is itself a bot (don't bot-to-bot chain off
+    // questions) or (b) the message @s a DIFFERENT bot explicitly (defer to
+    // that bot's directed dispatch). Otherwise, consume the key and skip
+    // the ambient trigger fn so the LLM pipeline runs.
+    let autoListenBypass = false;
+    const authorIsBot = typeof user_id === "string" && user_id.startsWith("bot_");
+    if (!authorIsBot) {
+      const cacheBinding = config.cacheBinding || "CACHE";
+      const cache = env[cacheBinding];
+      if (cache && typeof cache.get === "function") {
+        try {
+          const key = `bot_listening:${config.botName}:${channel_slug}`;
+          const flag = await cache.get(key);
+          if (flag) {
+            const myBot = String(config.botName || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            const myMentionRe = myBot ? new RegExp(`@(?:bot_)?${myBot}\\b`, "i") : null;
+            const otherBotMentionRe = /@(?:bot_)?(?:courtney|dexter|jacob|maxwell|moxie|robert|wren|kate)\b/i;
+            const text = msgBody || "";
+            const mentionsOther =
+              otherBotMentionRe.test(text) && !(myMentionRe && myMentionRe.test(text));
+            if (!mentionsOther) {
+              autoListenBypass = true;
+              await cache.delete(key).catch(() => {});
+              console.log(`[handleChatMessage] auto-listen fired for ${config.botName} in #${channel_slug}`);
+            }
+          }
+        } catch (err) {
+          console.warn(`[handleChatMessage] auto-listen KV check failed: ${err?.message}`);
+        }
+      }
+    }
+
+    if (!autoListenBypass) {
+      const ambientFn = config.triggers?.ambient;
+      const meta = { attachments: Array.isArray(attachments) ? attachments : [] };
+      if (ambientFn && !ambientFn(msgBody || "", reply_to ?? null, null, meta)) {
+        return json({ success: true, skipped: true });
+      }
     }
   }
 
