@@ -412,7 +412,7 @@ export async function runLlmPipeline({
       attachmentWarnings = warnings;
       if (blocks.length > 0) {
         const blockTextSummary = attachments
-          .map((a) => `${a.filename || a.id} (${a.mime_type || "unknown"})`)
+          .map((a) => `${a.filename || a.id} [id=${a.id}] (${a.mime_type || "unknown"})`)
           .join(", ");
         userContent = [
           ...blocks,
