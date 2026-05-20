@@ -42,6 +42,7 @@ import { withProvenance } from "../lib/provenanceContext.js";
 import { bangReport } from "../lib/embedCard.js";
 import { buildAttachmentContentBlocks } from "../lib/attachments.js";
 import { shouldChimeIn } from "../lib/watercooler.js";
+import { phoenixToday } from "../lib/format.js";
 
 // Detect GIF-only messages so bots receive "[GIF image: <url>]" instead of
 // a bare CDN URL they cannot interpret.
@@ -441,7 +442,18 @@ export async function runLlmPipeline({
       "\n\nTo @-mention a user back in a reply, write @DisplayName (exactly as it appears in the" +
       " message prefix before the colon, e.g. if the message starts with `Dirk (uid:abc123): ...`" +
       " then write @Dirk). Do not invent a user id syntax -- plain @DisplayName is the correct form.";
-    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_MENTION_RULE + channelContextBlock;
+    // Anchor the model to AZ wall-clock time so it never falls back to its
+    // training-cutoff "today". AZ is UTC-7 year-round (no DST). Brian is in
+    // Arizona; the whole company operates on AZ local time. Without this
+    // block bots drift days behind because they inherit the model's cutoff.
+    const today = phoenixToday();
+    const NEXUS_TODAY =
+      `\n\nCURRENT DATE AND TIME (authoritative — overrides any internal "today" you might recall):` +
+      `\n- Today is ${today.full} in Arizona (America/Phoenix, UTC-7, no DST).` +
+      `\n- Local time right now: ${today.time}.` +
+      `\n- ISO date: ${today.iso}. ISO 8601: ${today.iso8601}.` +
+      `\n- When asked what day/time it is, or when computing schedules, reports, due dates, or "today/yesterday/tomorrow", USE THIS. Do not use UTC. Do not use your training cutoff.`;
+    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_TODAY + NEXUS_MENTION_RULE + channelContextBlock;
 
     const channelHistoryTool = {
       name: "read_channel_history",
@@ -825,7 +837,11 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     "You are on Nexus, Black Raven IT's internal comms platform." +
     " Everyone here is a Black Raven IT employee or subcontractor." +
     " Never question anyone's identity.";
-  const fullSystemPrompt = `${wcConfig.systemPrompt}\n\n${nexusIdentity}\n\n${groundingRules}`;
+  const wcToday = phoenixToday();
+  const wcTodayBlock =
+    `CURRENT DATE AND TIME (use this if you reference today/yesterday/tomorrow or the time of day):\n` +
+    `- ${wcToday.full}, ${wcToday.time}. ISO ${wcToday.iso}. Arizona local (UTC-7, no DST).`;
+  const fullSystemPrompt = `${wcConfig.systemPrompt}\n\n${nexusIdentity}\n\n${wcTodayBlock}\n\n${groundingRules}`;
 
   try {
     await sendTyping(env, channel_slug, "start", nexusOptions);

@@ -116,6 +116,42 @@ export function nexusTimestamp(d, format = "f") {
   return `<t:${secs}:${format}>`;
 }
 
+/**
+ * Canonical "what day/time is it in AZ?" snapshot for system-prompt grounding
+ * and any cron/report that needs a stable local-day reference. AZ has no DST
+ * (UTC-7 year-round) so this is rock-solid.
+ *
+ * Returns:
+ *   iso       "2026-05-20"                 — local YYYY-MM-DD
+ *   weekday   "Wednesday"
+ *   full      "Wednesday, May 20, 2026"
+ *   time      "2:34 PM AZ"
+ *   iso8601   "2026-05-20T14:34:00-07:00"  — wall-clock with AZ offset
+ */
+export function phoenixToday(now = new Date()) {
+  return {
+    iso: fmtDate(now, { format: "iso", tz: AZ }),
+    weekday: fmtDate(now, { format: "day", tz: AZ }),
+    full: fmtDate(now, { format: "full", tz: AZ }),
+    time: fmtTime(now, { tz: AZ }),
+    iso8601: (() => {
+      const parts = new Intl.DateTimeFormat("en-CA", {
+        timeZone: AZ,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+        second: "2-digit",
+        hour12: false,
+      }).formatToParts(now);
+      const m = Object.fromEntries(parts.filter((p) => p.type !== "literal").map((p) => [p.type, p.value]));
+      const hour = m.hour === "24" ? "00" : m.hour;
+      return `${m.year}-${m.month}-${m.day}T${hour}:${m.minute}:${m.second}-07:00`;
+    })(),
+  };
+}
+
 // ─── NUMBERS / MONEY ────────────────────────────────────────────────────────
 
 /**
