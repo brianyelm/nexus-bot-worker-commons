@@ -64,6 +64,12 @@ export const FOUNDATION_COMMAND_META = [
     usage: "!status",
     admin: false,
   },
+  {
+    trigger: "fleet",
+    description: "Show fleet health across all bot workers",
+    usage: "!fleet",
+    admin: false,
+  },
 ];
 
 /**

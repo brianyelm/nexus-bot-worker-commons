@@ -25,7 +25,7 @@
 // All implementations live under src/lib and src/handlers.
 // =============================================================================
 
-export { handleChatMessage, runLlmPipeline } from "./handlers/handleChatMessage.js";
+export { handleChatMessage, runLlmPipeline, buildFoundationHandlers } from "./handlers/handleChatMessage.js";
 export { LlmRoomBase } from "./durable/LlmRoom.js";
 export { handleCommandList, FOUNDATION_COMMAND_META } from "./handlers/handleCommandList.js";
 export { callAnthropic, callAnthropicWithTools } from "./lib/anthropic.js";
@@ -78,3 +78,4 @@ export {
   makeJoinCommand,
   makeLeaveCommand,
 } from "./lib/voiceJoin.js";
+export { createBangCommandTool } from "./lib/voiceBangCommand.js";

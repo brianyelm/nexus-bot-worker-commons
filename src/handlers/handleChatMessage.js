@@ -150,6 +150,9 @@ function json(body, status = 200) {
  * These need runtime context (env bindings, historyKey) so they cannot be
  * defined statically.
  *
+ * Exported so voice surfaces (each bot's tools/bangCommand.js) can reuse the
+ * same handlers via run_bang_command without re-implementing them.
+ *
  * @param {object} env
  * @param {string} userId
  * @param {string} historyKey
@@ -158,7 +161,7 @@ function json(body, status = 200) {
  * @param {object} nexusOptions - passed to postToNexus calls inside handlers
  * @returns {object} Map of verb -> async (cmdCtx) => void
  */
-function buildFoundationHandlers(env, userId, historyKey, channel_slug, config, nexusOptions) {
+export function buildFoundationHandlers(env, userId, historyKey, channel_slug, config, nexusOptions) {
   const botName = config.botName || "bot";
   const displayName = config.persona?.displayName || botName;
 
