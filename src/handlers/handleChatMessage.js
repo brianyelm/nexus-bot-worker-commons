@@ -1190,7 +1190,10 @@ export async function handleChatMessage(request, env, ctx, config) {
 
     if (!autoListenBypass) {
       const ambientFn = config.triggers?.ambient;
-      const meta = { attachments: Array.isArray(attachments) ? attachments : [] };
+      const meta = {
+        attachments: Array.isArray(attachments) ? attachments : [],
+        channel_slug,
+      };
       if (ambientFn && !ambientFn(msgBody || "", reply_to ?? null, null, meta)) {
         return json({ success: true, skipped: true });
       }
