@@ -47,6 +47,52 @@ import { shouldChimeIn } from "../lib/watercooler.js";
 // a bare CDN URL they cannot interpret.
 const GIF_URL_RE = /^https:\/\/(?:media\d*|i)\.giphy\.com\/|^https:\/\/media\.tenor\.com\//i;
 
+/**
+ * Hand a chat-message job to the bot's LlmRoom Durable Object so the LLM
+ * tool loop runs outside the calling worker's 30s waitUntil ceiling. Falls
+ * back to inline withProvenance + runLlmPipeline when the DO binding is
+ * absent (legacy bots that haven't migrated yet).
+ *
+ * @param {object} env - worker bindings (DO binding read via config.llmRoomBinding)
+ * @param {string} historyKey - "nexus:<user_id>", used as DO instance name suffix
+ * @param {object} job - serializable payload (no functions); pipeline args + provenance
+ * @param {object} config - bot config (NOT serialized; the DO subclass imports it itself)
+ * @returns {Promise<void>}
+ */
+async function dispatchLlmJob(env, historyKey, job, config) {
+  const bindingName = config.llmRoomBinding || "LLM_ROOM";
+  const ns = env[bindingName];
+
+  if (!ns || typeof ns.idFromName !== "function") {
+    console.warn(`[handleChatMessage] no ${bindingName} DO binding; running inline (may hit 30s waitUntil cap)`);
+    try {
+      await withProvenance(job.provenance || "mention-reply", () =>
+        runLlmPipeline({ env, ...job, config })
+      );
+    } catch (err) {
+      console.error("[handleChatMessage] inline pipeline error:", err?.message);
+    }
+    return;
+  }
+
+  const id = ns.idFromName(`${config.botName || "bot"}:${historyKey}`);
+  const stub = ns.get(id);
+
+  try {
+    const res = await stub.fetch("https://llm-room.internal/run", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(job),
+    });
+    if (!res.ok) {
+      const txt = await res.text().catch(() => "");
+      console.warn(`[handleChatMessage] LlmRoom dispatch non-2xx ${res.status}: ${txt.slice(0, 200)}`);
+    }
+  } catch (err) {
+    console.error("[handleChatMessage] LlmRoom dispatch failed:", err?.message);
+  }
+}
+
 function annotateGifBody(body) {
   if (!body) return body;
   const trimmed = body.trim();
@@ -271,7 +317,7 @@ function buildFoundationHandlers(env, userId, historyKey, channel_slug, config, 
  * @param {object} args
  * @returns {Promise<void>}
  */
-async function runLlmPipeline({
+export async function runLlmPipeline({
   env,
   user_id,
   display_name,
@@ -1089,13 +1135,15 @@ export async function handleChatMessage(request, env, ctx, config) {
   }
 
   // ---- 8. Deferred LLM pipeline -------------------------------------------
-  // Nexus aborts the inbound callback fetch at 8s. The tool-use loop routinely
-  // takes 30+ seconds. Return 202 immediately and push the pipeline into
-  // ctx.waitUntil so it survives the client abort.
+  // The tool-use loop routinely runs 30+ seconds (multimodal PDFs, big Xero
+  // queries). ctx.waitUntil has a ~30s wall-clock ceiling; over that it gets
+  // cancelled and the bot never posts a reply. Hand the work to the LlmRoom
+  // Durable Object which queues the job and processes it in an alarm handler
+  // with no waitUntil ceiling. The DO binding is named via config.llmRoomBinding
+  // (default LLM_ROOM); falls back to inline waitUntil if the binding is
+  // missing so legacy bots without DO wiring still work.
   const labeledUserText = `${display_name || user_id} (uid:${user_id}): ${annotateGifBody(userText)}`;
-
-  ctx.waitUntil(withProvenance("mention-reply", () => runLlmPipeline({
-    env,
+  const llmJob = {
     user_id,
     display_name,
     channel_slug,
@@ -1103,8 +1151,10 @@ export async function handleChatMessage(request, env, ctx, config) {
     labeledUserText,
     historyKey,
     attachments,
-    config,
-  })));
+    provenance: "mention-reply",
+  };
+
+  ctx.waitUntil(dispatchLlmJob(env, historyKey, llmJob, config));
 
   return json({ success: true, queued: true }, 202);
 }

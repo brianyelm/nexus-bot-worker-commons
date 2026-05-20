@@ -25,7 +25,8 @@
 // All implementations live under src/lib and src/handlers.
 // =============================================================================
 
-export { handleChatMessage } from "./handlers/handleChatMessage.js";
+export { handleChatMessage, runLlmPipeline } from "./handlers/handleChatMessage.js";
+export { LlmRoomBase } from "./durable/LlmRoom.js";
 export { handleCommandList, FOUNDATION_COMMAND_META } from "./handlers/handleCommandList.js";
 export { callAnthropic, callAnthropicWithTools } from "./lib/anthropic.js";
 export { verifyNexusSignature, timingSafeEqual } from "./lib/callbackSign.js";
