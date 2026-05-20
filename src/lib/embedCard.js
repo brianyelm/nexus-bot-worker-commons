@@ -108,3 +108,147 @@ export function bangAlert({ botName, verb, args, sections } = {}) {
     subtitle: `${botName} ${verb}${argsPart}`,
   });
 }
+
+// =============================================================================
+// buildReport — rich markdown card for human-facing reports.
+//
+// Hybrid format reset (2026-05-20): bangReport stays for diagnostics / monospace
+// output (errors, JSON dumps, monitor lines, command echoes). buildReport is the
+// new path for human-facing briefings, digests, recaps, HITL approvals, and
+// anything a person will skim. See persona-blocks/FLEET_OUTPUT_STYLE.md.
+//
+// Output is pure markdown — no surrounding code fence. The Nexus renderer
+// (MessageBody.jsx → marked.js + DOMPurify) handles GFM, custom emoji, mention
+// chips, channel chips, and Discord-style <t:UNIX:X> timestamp tokens.
+//
+// Toast/push preview rule: the first 140 chars after stripMarkdown() must
+// stand alone. The title line is emitted first, no timestamp token in it.
+// =============================================================================
+
+import {
+  fmtList as _fmtList,
+  nexusTimestamp as _nexusTimestamp,
+  stripMarkdown as _stripMarkdown,
+} from "./format.js";
+
+const MAX_POST_CHARS = 6000;   // soft cap; postToNexus hard cap is 8000
+const SECTION_DIVIDER = "\n\n---\n\n";
+
+/**
+ * Build a rich-markdown report.
+ *
+ * @param {object} opts
+ * @param {string} opts.botName        - "Dexter" / "Wren" / etc.
+ * @param {string} [opts.emoji]        - palette glyph prefixed to the title (e.g. PALETTE.METRICS)
+ * @param {string} opts.title          - sentence-case title, e.g. "Morning Briefing"
+ * @param {string} [opts.subtitle]     - one-liner under the title (italic)
+ * @param {Array<ReportSection>} opts.sections
+ * @param {string} [opts.footer]       - optional footer prose; "{botName} · {title}" is the default
+ * @param {Date|number|string} [opts.generatedAt] - timestamp used in default footer; current time if omitted
+ * @returns {string} markdown ready to pass to postToNexus
+ *
+ * @typedef {object} ReportSection
+ * @property {string} [emoji]      - palette glyph (e.g. PALETTE.SCHEDULE)
+ * @property {string} title        - section title; goes in `### **bold**`
+ * @property {number} [count]      - optional "(N)" suffix after the title
+ * @property {string[]} [items]    - bullet list lines (already markdown-formatted)
+ * @property {string} [lines]      - raw multi-line content; mutually exclusive with items
+ * @property {number} [max=8]      - overflow cap on items (Infinity to disable)
+ * @property {string} [overflowLabel] - override "_+N more_"
+ * @property {string} [empty]      - text when items is empty (default "(none)")
+ */
+export function buildReport(opts = {}) {
+  const {
+    botName,
+    emoji,
+    title,
+    subtitle,
+    sections = [],
+    footer,
+    generatedAt,
+  } = opts;
+
+  const titlePrefix = emoji ? `${emoji} ` : "";
+  const titleLine = `## ${titlePrefix}${title || botName || "Report"}`;
+
+  const out = [titleLine];
+  if (subtitle) out.push(`*${subtitle}*`);
+
+  const renderedSections = (Array.isArray(sections) ? sections : [])
+    .map(renderSection)
+    .filter(Boolean);
+
+  if (renderedSections.length > 0) {
+    out.push("");
+    out.push(renderedSections.join(SECTION_DIVIDER));
+  }
+
+  const stamp = generatedAt ? _nexusTimestamp(generatedAt, "f") : _nexusTimestamp(Date.now(), "f");
+  const defaultFooter = botName && title ? `${botName} · ${title}` : (botName || title || "");
+  const footerLine = footer || defaultFooter;
+  if (footerLine) {
+    out.push("");
+    out.push(`---`);
+    out.push(`*${footerLine} · ${stamp}*`);
+  }
+
+  let report = out.join("\n");
+
+  // Soft length guard. Walk sections from the end and trim until we're under cap.
+  if (report.length > MAX_POST_CHARS && renderedSections.length > 1) {
+    const head = [titleLine];
+    if (subtitle) head.push(`*${subtitle}*`);
+    let kept = renderedSections.slice();
+    while (kept.length > 1) {
+      kept.pop();
+      const trimmed = [
+        ...head,
+        "",
+        kept.join(SECTION_DIVIDER),
+        "",
+        "---",
+        `*${defaultFooter} · ${stamp} · _truncated_*`,
+      ].join("\n");
+      if (trimmed.length <= MAX_POST_CHARS) {
+        report = trimmed;
+        break;
+      }
+    }
+  }
+
+  return report;
+}
+
+function renderSection(sec) {
+  if (!sec || typeof sec !== "object") return "";
+  const headerEmoji = sec.emoji ? `${sec.emoji} ` : "";
+  const countSuffix = typeof sec.count === "number" ? ` *(${sec.count})*` : "";
+  const heading = `### ${headerEmoji}**${sec.title || ""}**${countSuffix}`.trim();
+
+  let body;
+  if (typeof sec.lines === "string" && sec.lines.length > 0) {
+    body = sec.lines;
+  } else if (Array.isArray(sec.items)) {
+    if (sec.items.length === 0) {
+      body = sec.empty ?? "(none)";
+    } else {
+      body = _fmtList(sec.items, {
+        bullet: "•",
+        max: typeof sec.max === "number" ? sec.max : 8,
+        overflowSuffix: sec.overflowLabel,
+      });
+    }
+  } else {
+    body = sec.empty ?? "";
+  }
+
+  return `${heading}\n${body}`.trim();
+}
+
+/**
+ * Helper for callers that want to verify their report's preview line is
+ * readable (the first 140 chars after stripMarkdown). Intended for tests.
+ */
+export function previewOf(report) {
+  return _stripMarkdown(report).slice(0, 140);
+}

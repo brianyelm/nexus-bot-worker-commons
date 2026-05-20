@@ -18,7 +18,10 @@
     "./lib/hitl": "./src/lib/hitl.js",
     "./lib/triggers": "./src/lib/triggers.js",
     "./lib/attachments": "./src/lib/attachments.js",
-    "./lib/memoryService": "./src/lib/memoryService.js"
+    "./lib/memoryService": "./src/lib/memoryService.js",
+    "./lib/format": "./src/lib/format.js",
+    "./lib/embedCard": "./src/lib/embedCard.js",
+    "./persona-blocks": "./src/persona-blocks/index.js"
   },
   "files": [
     "src/",
@@ -27,7 +30,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node --test test/"
+    "test": "node --test \"test/**/*.test.js\""
   },
   "engines": {
     "node": ">=20"
