@@ -330,9 +330,14 @@ export async function runLlmPipeline({
   labeledUserText,
   historyKey,
   attachments,
+  reply_to,
   config,
 }) {
   const nexusOptions = { nexusKeyEnvVar: config.nexusKeyEnvVar };
+  // When the triggering message was part of a thread, reply_to is the
+  // parent message id. Thread the same reply_to into every outbound post
+  // so the bot's response lands in the same thread as the user's message.
+  if (reply_to) nexusOptions.reply_to = reply_to;
   const actionRegex = config.actionRegex || /<action>([\s\S]*?)<\/action>/;
   const systemPrompt = config.persona.systemPrompt;
   const approvalSlug = config.approvalSlug || "soc-approvals";
@@ -1261,6 +1266,9 @@ export async function handleChatMessage(request, env, ctx, config) {
     labeledUserText,
     historyKey,
     attachments,
+    // Pass reply_to so the LLM pipeline posts into the same thread.
+    // undefined is omitted by JSON.stringify so no-thread messages stay clean.
+    reply_to: reply_to || undefined,
     provenance: "mention-reply",
   };
 
