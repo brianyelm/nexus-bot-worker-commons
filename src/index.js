@@ -79,3 +79,4 @@ export {
   makeLeaveCommand,
 } from "./lib/voiceJoin.js";
 export { createBangCommandTool } from "./lib/voiceBangCommand.js";
+export { buildMimeMessage, sendMimeEmail } from "./lib/mimeEmail.js";
