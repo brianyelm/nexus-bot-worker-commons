@@ -426,7 +426,11 @@ export async function editNexusMessage(env, messageId, body, options = {}) {
           "Content-Type": "application/json",
           "Authorization": `Bearer ${apiKey}`,
         },
-        body: JSON.stringify({ body, body_format: "markdown" }),
+        body: JSON.stringify({
+          body,
+          body_format: "markdown",
+          ...(options.clearComponents ? { clear_components: true } : {}),
+        }),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       },
     );
