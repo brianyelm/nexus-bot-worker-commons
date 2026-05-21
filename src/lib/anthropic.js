@@ -163,6 +163,9 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
   if (typeof text !== "string") {
     throw new Error(`[anthropic] unexpected response shape: ${JSON.stringify(data)}`);
   }
+  if (typeof options.onUsage === "function" && data.usage) {
+    try { options.onUsage(data.usage); } catch (e) { /* never break main flow */ }
+  }
   return text;
 }
 
@@ -220,6 +223,7 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
   let iterations = 0;
   let response;
   let turnIndex = 0;
+  const usageAcc = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
 
   const onTurnStart = typeof options.onTurnStart === "function" ? options.onTurnStart : null;
   if (onTurnStart) {
@@ -232,6 +236,12 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
     ...baseParams,
     messages: applyCacheToLastMessage(workingMessages),
   });
+  if (response.usage) {
+    usageAcc.input_tokens += response.usage.input_tokens || 0;
+    usageAcc.output_tokens += response.usage.output_tokens || 0;
+    usageAcc.cache_creation_input_tokens += response.usage.cache_creation_input_tokens || 0;
+    usageAcc.cache_read_input_tokens += response.usage.cache_read_input_tokens || 0;
+  }
 
   while (response.stop_reason === "tool_use") {
     iterations++;
@@ -282,7 +292,16 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
       ...baseParams,
       messages: applyCacheToLastMessage(workingMessages),
     });
+    if (response.usage) {
+      usageAcc.input_tokens += response.usage.input_tokens || 0;
+      usageAcc.output_tokens += response.usage.output_tokens || 0;
+      usageAcc.cache_creation_input_tokens += response.usage.cache_creation_input_tokens || 0;
+      usageAcc.cache_read_input_tokens += response.usage.cache_read_input_tokens || 0;
+    }
   }
 
+  if (typeof options.onUsage === "function") {
+    try { options.onUsage(usageAcc); } catch (e) { /* never break main flow */ }
+  }
   return extractText(response);
 }

@@ -338,6 +338,7 @@ export async function runLlmPipeline({
   const approvalSlug = config.approvalSlug || "soc-approvals";
 
   let responseText;
+  let capturedUsage = null;
   let history;
 
   // "<bot> is typing..." indicator. Nexus dispatch already fires a
@@ -619,6 +620,7 @@ export async function runLlmPipeline({
           if (turnIndex === 0) return; // already armed above
           return sendTyping(env, channel_slug, "start", nexusOptions);
         },
+        onUsage: (usage) => { capturedUsage = usage; },
       },
     );
   } catch (err) {
@@ -640,6 +642,29 @@ export async function runLlmPipeline({
     try {
       await sendTyping(env, channel_slug, "stop", nexusOptions);
     } catch { /* ignore */ }
+  }
+
+  if (capturedUsage && env.USAGE_REPORT_URL) {
+    const model = env.CLAUDE_MODEL || "claude-opus-4-7";
+    fetch(env.USAGE_REPORT_URL, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-internal-token": env.NEXUS_INTERNAL_TOKEN || "",
+      },
+      body: JSON.stringify({
+        bot: config.botName || "unknown",
+        model,
+        input_tokens: capturedUsage.input_tokens,
+        output_tokens: capturedUsage.output_tokens,
+        cache_creation_input_tokens: capturedUsage.cache_creation_input_tokens,
+        cache_read_input_tokens: capturedUsage.cache_read_input_tokens,
+        channel_slug,
+        surface: "chat",
+        ts: new Date().toISOString(),
+      }),
+      signal: AbortSignal.timeout(5000),
+    }).catch(() => {});
   }
 
   // ---- <action> block detection --------------------------------------------
