@@ -63,6 +63,7 @@ export {
   fmtList,
   fmtKv,
   fmtTable,
+  fmtFixedTable,
   joinOxford,
   stripMarkdown,
   mention,

@@ -290,6 +290,47 @@ export function fmtTable(headers, rows) {
   return [fmtRow(h), fmtRow(sep), ...r.map(fmtRow)].join("\n");
 }
 
+/**
+ * Fixed-width monospace table for bangAlert / bangReport bodies. Pads each
+ * column to the widest cell so columns line up under the code-block render.
+ * Use this on HITL cards and any plain-text section that mixes labels with
+ * numeric columns.
+ *
+ *   headers: ["Description", "Qty", "Rate", "Amount"]
+ *   rows:    [["Cloud Storage", "13", "$12.00", "$156.00"], ...]
+ *   align:   ["left", "right", "right", "right"]      // optional per-column
+ *   gap:     "  "                                     // optional, default 2 spaces
+ *   indent:  "  "                                     // optional, default 2 spaces
+ *
+ * Returns a multi-line string (no trailing newline). Cells are coerced to
+ * strings; null/undefined render as "". Headers may be omitted (pass null).
+ */
+export function fmtFixedTable(headers, rows, opts = {}) {
+  const { align = [], gap = "  ", indent = "  " } = opts;
+  const r = Array.isArray(rows) ? rows : [];
+  if (r.length === 0 && !headers) return "";
+  const h = Array.isArray(headers) ? headers : null;
+  const cells = (h ? [h, ...r] : r).map(row =>
+    (Array.isArray(row) ? row : []).map(c => String(c ?? "")),
+  );
+  const colCount = cells.reduce((m, row) => Math.max(m, row.length), 0);
+  const widths = new Array(colCount).fill(0);
+  for (const row of cells) {
+    for (let i = 0; i < colCount; i++) {
+      widths[i] = Math.max(widths[i], (row[i] || "").length);
+    }
+  }
+  const pad = (s, w, a) => (a === "right" ? s.padStart(w) : s.padEnd(w));
+  const renderRow = (row) => indent + row.map((c, i) => {
+    const isLast = i === colCount - 1;
+    const a = align[i] || (i === 0 ? "left" : "right");
+    const padded = pad(c, widths[i], a);
+    // Trim trailing spaces on the last column for clean line endings.
+    return isLast && a === "left" ? padded.trimEnd() : padded;
+  }).join(gap);
+  return cells.map(renderRow).join("\n");
+}
+
 /** Oxford-comma join. ['a','b','c'] → "a, b, and c". */
 export function joinOxford(items, conj = "and") {
   const arr = (Array.isArray(items) ? items : []).map(String);
