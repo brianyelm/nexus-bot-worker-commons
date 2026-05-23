@@ -472,6 +472,11 @@ export async function editNexusMessage(env, messageId, body, options = {}) {
  * message arrival also handles this, so an explicit stop is mostly
  * insurance for error paths).
  *
+ * When options.thread_id is provided, the indicator is scoped to that
+ * thread's open panel only -- the main channel's typing row stays empty
+ * so the bot doesn't appear to be typing in the channel when it's
+ * actually replying inside a thread.
+ *
  * Why this uses the X-API-Key route, not the channel-gated Bearer route:
  * the typing entry's user_id needs to match the eventual message's
  * user_id so the DO's auto-clear-on-arrival logic lines up. The legacy
@@ -487,6 +492,7 @@ export async function editNexusMessage(env, messageId, body, options = {}) {
  * @param {"start"|"stop"} action
  * @param {object} [options]
  * @param {string} [options.nexusKeyEnvVar] - env var name holding the API key
+ * @param {string} [options.thread_id] - parent message id when scoping typing to a thread panel
  * @returns {Promise<void>}
  */
 export async function sendTyping(env, slug, action, options = {}) {
@@ -495,6 +501,8 @@ export async function sendTyping(env, slug, action, options = {}) {
   if (action !== "start" && action !== "stop") return;
   if (!slug || typeof slug !== "string") return;
   try {
+    const payload = { channel_slug: slug, action };
+    if (options.thread_id) payload.thread_id = options.thread_id;
     const res = await fetch(
       `${env.NEXUS_BASE_URL}/api/bot/typing`,
       {
@@ -503,7 +511,7 @@ export async function sendTyping(env, slug, action, options = {}) {
           "Content-Type": "application/json",
           "X-API-Key": apiKey,
         },
-        body: JSON.stringify({ channel_slug: slug, action }),
+        body: JSON.stringify(payload),
         signal: AbortSignal.timeout(TIMEOUT_MS),
       },
     );
@@ -585,6 +593,40 @@ export async function fetchChannelMessages(env, slug, options = {}) {
     return j?.data || null;
   } catch (err) {
     console.warn(`[nexus] fetchChannelMessages(${slug}) failed:`, err.message);
+    return null;
+  }
+}
+
+/**
+ * Read a full thread (parent + replies) by parent message id.
+ * Uses GET /api/messages/:id/thread (session auth path; bots access via
+ * the internal-token route below when called from a worker).
+ *
+ * @param {object} env
+ * @param {string} parentId - the thread root message id
+ * @param {object} [options]
+ * @param {string} [options.nexusKeyEnvVar]
+ * @returns {Promise<{ parent: object, replies: object[] }|null>}
+ */
+export async function fetchThreadMessages(env, parentId, options = {}) {
+  const apiKey = resolveNexusKey(env, options);
+  if (!apiKey || !env.NEXUS_BASE_URL || !parentId) return null;
+  try {
+    const url = `${env.NEXUS_BASE_URL}/api/bot/threads/${encodeURIComponent(parentId)}`;
+    const res = await fetch(url, {
+      method: "GET",
+      headers: { "Authorization": `Bearer ${apiKey}` },
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      console.warn(`[nexus] fetchThreadMessages(${parentId}) -> ${res.status}: ${text}`);
+      return null;
+    }
+    const j = await res.json().catch(() => ({}));
+    return j?.data || null;
+  } catch (err) {
+    console.warn(`[nexus] fetchThreadMessages(${parentId}) failed:`, err.message);
     return null;
   }
 }

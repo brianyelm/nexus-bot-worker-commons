@@ -36,7 +36,7 @@ import { loadHistory, appendHistory } from "../lib/history.js";
 import { rememberFact, forgetFact, listFacts, buildFactsBlock } from "../lib/memory.js";
 import { persistTurnPair, resolveEntity } from "../lib/memoryService.js";
 import { callAnthropicWithTools, callAnthropic } from "../lib/anthropic.js";
-import { postToNexus, sendTyping, fetchChannelMessages } from "../lib/nexus.js";
+import { postToNexus, sendTyping, fetchChannelMessages, fetchThreadMessages } from "../lib/nexus.js";
 import { postApprovalCard } from "../lib/hitl.js";
 import { withProvenance } from "../lib/provenanceContext.js";
 import { bangReport } from "../lib/embedCard.js";
@@ -338,6 +338,12 @@ export async function runLlmPipeline({
   // parent message id. Thread the same reply_to into every outbound post
   // so the bot's response lands in the same thread as the user's message.
   if (reply_to) nexusOptions.reply_to = reply_to;
+  // When replying in a thread, scope every "<bot> is typing..." frame to
+  // that thread panel only. Without thread_id the indicator surfaces in
+  // the parent channel's bottom-row footer, which is confusing when the
+  // bot is actually conversing inside a thread side panel.
+  const typingOptions = { ...nexusOptions };
+  if (reply_to) typingOptions.thread_id = reply_to;
   const actionRegex = config.actionRegex || /<action>([\s\S]*?)<\/action>/;
   const systemPrompt = config.persona.systemPrompt;
   const approvalSlug = config.approvalSlug || "soc-approvals";
@@ -355,7 +361,7 @@ export async function runLlmPipeline({
   // see a stale "typing" trail after the bot has actually returned. The
   // Nexus typing route resolves the bot identity from the Bearer key, so
   // commons does not need to know the bot user id here.
-  await sendTyping(env, channel_slug, "start", nexusOptions);
+  await sendTyping(env, channel_slug, "start", typingOptions);
 
   try {
     history = await loadHistory(env, historyKey, { dbBinding: config.dbBinding });
@@ -363,9 +369,52 @@ export async function runLlmPipeline({
     // Auto-fetch recent channel messages so the bot knows what the broader
     // conversation looks like, not just its own per-user history. Default ON;
     // bots can opt out with config.channelContext = { enabled: false }.
+    //
+    // When reply_to is set, ALSO fetch the full thread (parent + replies) so
+    // the bot can read everything said in this side-conversation -- the EC2
+    // bots used to scroll back automatically when @mentioned in a thread, and
+    // the worker port had been only pulling the parent channel feed (which
+    // often did not include older thread replies). Brian flagged this as a
+    // migration regression 2026-05-23.
     let channelContextBlock = "";
+    let threadContextBlock = "";
     const ccEnabled = config.channelContext?.enabled !== false;
     const ccLimit = config.channelContext?.limit ?? 15;
+    if (reply_to) {
+      try {
+        const thread = await fetchThreadMessages(env, reply_to, nexusOptions);
+        if (thread && (thread.parent || (Array.isArray(thread.replies) && thread.replies.length > 0))) {
+          const lines = [];
+          const fmtRow = (m) => {
+            const who = m.display_name || m.user_id || "unknown";
+            let ts = "";
+            if (m.created_at !== undefined && m.created_at !== null) {
+              const d = new Date(m.created_at);
+              if (!Number.isNaN(d.getTime())) ts = d.toISOString().slice(11, 16);
+            }
+            const body = (m.body || "").slice(0, 600);
+            const atts = Array.isArray(m.attachments) ? m.attachments : [];
+            const attSuffix = atts.length
+              ? ` [attachments: ${atts.map((a) => `${a.filename || a.id} (${a.mime_type || "?"}, id=${a.id})`).join(", ")}]`
+              : "";
+            return `[${ts}] ${who}: ${body}${attSuffix}`;
+          };
+          if (thread.parent) lines.push(`(thread parent) ${fmtRow(thread.parent)}`);
+          for (const r of thread.replies || []) {
+            if (r.user_id === "system") continue;
+            lines.push(fmtRow(r));
+          }
+          if (lines.length > 0) {
+            threadContextBlock =
+              "\n\nTHREAD CONTEXT (this @mention came from inside a thread -- here is the full thread you are replying inside, oldest to newest):\n" +
+              lines.join("\n") +
+              "\n\nReply to the most recent message above. The user expects you to have read the whole thread; do not ask them to repeat themselves. Your reply will be posted inside this same thread.";
+          }
+        }
+      } catch (err) {
+        console.warn("[handleChatMessage] thread context fetch failed:", err.message);
+      }
+    }
     if (ccEnabled) {
       try {
         const recentMsgs = await fetchChannelMessages(env, channel_slug, {
@@ -462,7 +511,7 @@ export async function runLlmPipeline({
       `\n- Local time right now: ${today.time}.` +
       `\n- ISO date: ${today.iso}. ISO 8601: ${today.iso8601}.` +
       `\n- When asked what day/time it is, or when computing schedules, reports, due dates, or "today/yesterday/tomorrow", USE THIS. Do not use UTC. Do not use your training cutoff.`;
-    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_TODAY + NEXUS_MENTION_RULE + channelContextBlock;
+    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_TODAY + NEXUS_MENTION_RULE + threadContextBlock + channelContextBlock;
 
     const channelHistoryTool = {
       name: "read_channel_history",
@@ -623,7 +672,7 @@ export async function runLlmPipeline({
         // 2+. Best-effort: sendTyping never throws.
         onTurnStart: (turnIndex) => {
           if (turnIndex === 0) return; // already armed above
-          return sendTyping(env, channel_slug, "start", nexusOptions);
+          return sendTyping(env, channel_slug, "start", typingOptions);
         },
         onUsage: (usage) => { capturedUsage = usage; },
       },
@@ -645,7 +694,7 @@ export async function runLlmPipeline({
     // beneath the just-posted reply), but an explicit stop covers
     // error paths where no message is ever posted.
     try {
-      await sendTyping(env, channel_slug, "stop", nexusOptions);
+      await sendTyping(env, channel_slug, "stop", typingOptions);
     } catch { /* ignore */ }
   }
 
