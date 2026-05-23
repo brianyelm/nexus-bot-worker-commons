@@ -840,7 +840,7 @@ function findRepeatedPhrase(response, previousBotBodies) {
  * @param {object} args
  * @returns {Promise<void>}
  */
-async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, triggerUserId, triggerDisplayName, triggerBody, triggerMessageId }) {
+async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, triggerUserId, triggerDisplayName, triggerBody, inboundReplyTo }) {
   const nexusOptions = { nexusKeyEnvVar: config.nexusKeyEnvVar };
   const wcConfig = config.watercooler;
 
@@ -932,8 +932,12 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
         console.warn(`[watercooler] ${config.botName} repeat suppressed (phrase: "${repeated}"): ${cleaned.slice(0, 80)}`);
         return;
       }
+      // Only thread when the human's message was already in a thread.
+      // Posting top-level here keeps watercooler replies in the main channel
+      // by default; threading a top-level human message would silently spawn
+      // a new thread off it, which is what we are explicitly avoiding.
       const postOpts = { ...nexusOptions };
-      if (nameMention && triggerMessageId) postOpts.reply_to = triggerMessageId;
+      if (inboundReplyTo) postOpts.reply_to = inboundReplyTo;
       await postToNexus(env, channel_slug, cleaned, postOpts);
     }
   } catch (err) {
@@ -1193,7 +1197,7 @@ export async function handleChatMessage(request, env, ctx, config) {
         triggerUserId: user_id,
         triggerDisplayName: display_name,
         triggerBody: msgBody,
-        triggerMessageId: message_id,
+        inboundReplyTo: reply_to || null,
       })),
     );
     return json({ success: true, queued: true }, 202);
