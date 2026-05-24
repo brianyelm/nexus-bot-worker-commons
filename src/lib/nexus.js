@@ -55,6 +55,21 @@ async function _getReportFleetError() {
 const TIMEOUT_MS = 8000;
 
 /**
+ * Belt-and-suspenders sanitizer for outbound Nexus post bodies. The fleet
+ * style rule forbids em-dashes (U+2014) and en-dashes (U+2013) anywhere in
+ * bot output; this catches the case where an LLM ignores the prompt rule
+ * and emits one anyway. Mapped to the ASCII forms already used elsewhere
+ * in the codebase ("--" and "-"). String-only; non-strings pass through.
+ *
+ * @param {*} text
+ * @returns {*}
+ */
+function scrubFleetDashes(text) {
+  if (typeof text !== "string") return text;
+  return text.replace(/—/g, "--").replace(/–/g, "-");
+}
+
+/**
  * Resolve the Nexus API key from env using the provided env var name or
  * common fallback names.
  *
@@ -189,7 +204,8 @@ export async function postToNexus(env, slug, content, options = {}) {
     console.warn("[nexus] missing API key or NEXUS_BASE_URL, skipping post");
     return null;
   }
-  const body = typeof content === "string" ? content.slice(0, 8000) : String(content).slice(0, 8000);
+  const raw = typeof content === "string" ? content : String(content);
+  const body = scrubFleetDashes(raw).slice(0, 8000);
   const attachmentIds = Array.isArray(options.attachment_ids) && options.attachment_ids.length > 0
     ? options.attachment_ids
     : null;
@@ -417,6 +433,7 @@ export async function editNexusMessage(env, messageId, body, options = {}) {
   const apiKey = resolveNexusKey(env, options);
   if (!apiKey || !env.NEXUS_BASE_URL) return null;
   if (!messageId || typeof body !== "string" || !body.trim()) return null;
+  const scrubbedBody = scrubFleetDashes(body);
   try {
     const res = await fetch(
       `${env.NEXUS_BASE_URL}/api/bot/messages/${encodeURIComponent(messageId)}`,
@@ -427,7 +444,7 @@ export async function editNexusMessage(env, messageId, body, options = {}) {
           "Authorization": `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          body,
+          body: scrubbedBody,
           body_format: "markdown",
           ...(options.clearComponents ? { clear_components: true } : {}),
         }),
