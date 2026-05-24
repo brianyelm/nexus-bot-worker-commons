@@ -37,6 +37,7 @@
 // =============================================================================
 
 import { getProvenanceContext } from "./provenanceContext.js";
+import { scrubFleetDashes } from "./sanitize.js";
 
 // Lazy import to avoid circular dependency: fleetError imports postToNexus,
 // so we must not import at module load time (CF Workers module-scope I/O ban
@@ -53,21 +54,6 @@ async function _getReportFleetError() {
 }
 
 const TIMEOUT_MS = 8000;
-
-/**
- * Belt-and-suspenders sanitizer for outbound Nexus post bodies. The fleet
- * style rule forbids em-dashes (U+2014) and en-dashes (U+2013) anywhere in
- * bot output; this catches the case where an LLM ignores the prompt rule
- * and emits one anyway. Mapped to the ASCII forms already used elsewhere
- * in the codebase ("--" and "-"). String-only; non-strings pass through.
- *
- * @param {*} text
- * @returns {*}
- */
-function scrubFleetDashes(text) {
-  if (typeof text !== "string") return text;
-  return text.replace(/—/g, "--").replace(/–/g, "-");
-}
 
 /**
  * Resolve the Nexus API key from env using the provided env var name or

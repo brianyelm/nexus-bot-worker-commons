@@ -29,19 +29,24 @@ async function captureBody(content) {
   return calls[0]?.body;
 }
 
-test("postToNexus strips em-dashes", async () => {
+test("postToNexus replaces em-dashes with comma-space", async () => {
   const sent = await captureBody("alpha — beta — gamma");
-  assert.equal(sent.body, "alpha -- beta -- gamma");
+  assert.equal(sent.body, "alpha, beta, gamma");
 });
 
-test("postToNexus strips en-dashes", async () => {
+test("postToNexus collapses em-dashes without surrounding spaces", async () => {
+  const sent = await captureBody("alpha—beta—gamma");
+  assert.equal(sent.body, "alpha, beta, gamma");
+});
+
+test("postToNexus replaces en-dashes with hyphen", async () => {
   const sent = await captureBody("range 1–5 and 10–20");
   assert.equal(sent.body, "range 1-5 and 10-20");
 });
 
-test("postToNexus mixes em and en dashes correctly", async () => {
+test("postToNexus handles mixed em and en dashes", async () => {
   const sent = await captureBody("title — pages 3–7");
-  assert.equal(sent.body, "title -- pages 3-7");
+  assert.equal(sent.body, "title, pages 3-7");
 });
 
 test("postToNexus leaves ASCII hyphens alone", async () => {

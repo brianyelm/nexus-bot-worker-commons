@@ -10,6 +10,8 @@
 // higher than HTML-only messages from the JSON sendMail path.
 // =============================================================================
 
+import { scrubFleetDashes } from "./sanitize.js";
+
 const GRAPH_BASE = "https://graph.microsoft.com/v1.0";
 
 /**
@@ -103,11 +105,18 @@ export function buildMimeMessage(opts) {
     to,
     cc,
     bcc,
-    subject,
-    htmlBody,
-    textBody,
+    subject: rawSubject,
+    htmlBody: rawHtml,
+    textBody: rawText,
     attachments,
   } = opts;
+
+  // Strip em/en dashes from human-facing fields before MIME assembly. Fleet
+  // rule: dashes are a bot tell in email prose. Applied here so every caller
+  // gets it for free instead of relying on each per-bot send wrapper.
+  const subject = scrubFleetDashes(rawSubject);
+  const htmlBody = scrubFleetDashes(rawHtml);
+  const textBody = rawText != null ? scrubFleetDashes(rawText) : rawText;
 
   const toList = Array.isArray(to) ? to : [to];
   const ccList = Array.isArray(cc) ? cc : (cc ? [cc] : []);

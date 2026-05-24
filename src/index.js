@@ -35,6 +35,7 @@ export { loadHistory, appendHistory } from "./lib/history.js";
 export { rememberFact, forgetFact, listFacts, buildFactsBlock } from "./lib/memory.js";
 export { postToNexus, uploadBotAttachment, attachButtons, attachModals, editNexusMessage, sendNexusHeartbeat, sendTyping, pingBotPresence } from "./lib/nexus.js";
 export { withProvenance, getProvenanceContext } from "./lib/provenanceContext.js";
+export { scrubFleetDashes } from "./lib/sanitize.js";
 export { reportFleetError } from "./lib/fleetError.js";
 export { postApprovalCard, processButtonClick } from "./lib/hitl.js";
 export { makeShouldRespond } from "./lib/triggers.js";
