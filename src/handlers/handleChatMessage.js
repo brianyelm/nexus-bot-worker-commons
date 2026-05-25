@@ -324,6 +324,7 @@ export function buildFoundationHandlers(env, userId, historyKey, channel_slug, c
 export async function runLlmPipeline({
   env,
   user_id,
+  user_email,
   display_name,
   channel_slug,
   userText,
@@ -664,7 +665,7 @@ export async function runLlmPipeline({
       history,
       mergedTools,
       mergedHandlers,
-      { user_id, display_name, channel_slug },
+      { user_id, user_email, display_name, channel_slug },
       {
         // Re-arm the typing indicator before every Anthropic POST so
         // long tool loops (>90s total) don't lose the indicator on the
@@ -1040,6 +1041,7 @@ export async function handleChatMessage(request, env, ctx, config) {
   const {
     message_id,
     user_id,
+    user_email,
     display_name,
     body: msgBody,
     channel_slug,
@@ -1313,6 +1315,7 @@ export async function handleChatMessage(request, env, ctx, config) {
   const labeledUserText = `${display_name || user_id} (uid:${user_id}): ${annotateGifBody(userText)}`;
   const llmJob = {
     user_id,
+    user_email,
     display_name,
     channel_slug,
     userText,
