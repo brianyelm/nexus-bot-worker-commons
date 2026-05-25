@@ -452,8 +452,13 @@ export async function runLlmPipeline({
               "\n\nRECENT CHANNEL MESSAGES (context from #" + channel_slug +
               " so you understand the current conversation):\n" +
               lines.join("\n") +
-              "\n\nRespond to the latest message directed at you. Use the channel context above " +
-              "to understand what is being discussed, but do not repeat or summarize it unprompted.";
+              "\n\nRespond to the latest message directed at you, but FIRST read the messages above to " +
+              "understand what it is about. When the message refers to something implicitly -- 'it', " +
+              "'this', 'that one', 'send it', 'do it', 'go ahead', 'looks good', 'approve it' -- the " +
+              "referent is almost always the most recent relevant thing you or they just posted in this " +
+              "channel (an opportunity, quote, proposal, draft, invoice, document, or record). Resolve it " +
+              "from the context above and act on THAT specific item. Only ask what they mean if the context " +
+              "genuinely does not make it clear. Do not repeat or summarize the context unprompted.";
           }
         }
       } catch (err) {
