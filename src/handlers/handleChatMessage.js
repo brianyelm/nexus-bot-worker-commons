@@ -510,6 +510,13 @@ export async function runLlmPipeline({
       " Never question someone's identity, ask who they are, or treat them as an outsider." +
       ` You are speaking with ${display_name || user_id}.`;
     const NEXUS_MENTION_RULE =
+      "\n\nWHEN YOU ARE @-MENTIONED, the mention is NOT context-free -- it refers to the ongoing" +
+      " conversation. ALWAYS read the RECENT CHANNEL MESSAGES above before replying. If the user (or" +
+      " anyone) gave an instruction, request, target, file, or decision in a recent message -- even one" +
+      " not addressed to you by name -- and then pings you, treat it as directed at you and carry it out." +
+      " Do NOT respond to a bare '@you' by asking what they need, or repeat a question they already" +
+      " answered, when the recent messages make it clear. Pick up the thread and act on the most recent" +
+      " relevant instruction." +
       "\n\nTo @-mention a user back in a reply, write @DisplayName (exactly as it appears in the" +
       " message prefix before the colon, e.g. if the message starts with `Dirk (uid:abc123): ...`" +
       " then write @Dirk). Do not invent a user id syntax -- plain @DisplayName is the correct form.";
