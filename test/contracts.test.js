@@ -7,9 +7,11 @@ import {
   validateChatMessage,
   validateButtonClick,
   validateModalSubmit,
+  validateModalDefinition,
   fixtures,
   modalSubmitFixture,
   chatMessageFixture,
+  modalDefinitionFixture,
 } from "../contracts/index.js";
 import { signCallback, verifyNexusSignature } from "../src/lib/callbackSign.js";
 
@@ -39,6 +41,31 @@ test("modal-submit keyed `fields` instead of `values` is rejected", () => {
 
 test("modal-submit missing required ids is rejected", () => {
   assert.ok(validateModalSubmit({ modal_id: "m", user_id: "u", values: {} }).length > 0);
+});
+
+// ── modal DEFINITION (attach direction): value vs default_value ─────────────────
+
+test("modal-definition fixture validates clean", () => {
+  assert.deepEqual(validateModalDefinition(modalDefinitionFixture), []);
+});
+
+test("modal-definition field keyed `default_value` is rejected (renders blank)", () => {
+  const broken = {
+    ...modalDefinitionFixture,
+    fields: [{ name: "subject", label: "Subject", type: "text", default_value: "prefill" }],
+  };
+  const errs = validateModalDefinition(broken);
+  assert.ok(errs.some((e) => e.includes("default_value")), `should flag default_value, got: ${errs.join("; ")}`);
+});
+
+test("modal-definition rejects an unknown field type and missing title", () => {
+  const errs = validateModalDefinition({
+    modal_id: "m:1",
+    callback_url: "https://x/cb",
+    fields: [{ name: "f", label: "F", type: "slider" }],
+  });
+  assert.ok(errs.some((e) => e.includes("title")));
+  assert.ok(errs.some((e) => e.includes("type")));
 });
 
 // ── chat-message cross-field rules ──────────────────────────────────────────────

@@ -87,3 +87,44 @@ export const VALIDATORS = {
   "button-click": validateButtonClick,
   "modal-submit": validateModalSubmit,
 };
+
+const MODAL_FIELD_TYPES = new Set(["text", "textarea", "select"]);
+
+/**
+ * Validate a modal DEFINITION (the bot -> Nexus attach direction, distinct from
+ * the modal-submit callback). This is the shape a bot sends when attaching a
+ * modal to a message. Field pre-fill values belong under `value`; `default_value`
+ * is silently ignored by the Nexus UI (fields render blank) -- so it is flagged
+ * as non-conforming, the way `fields` is on the submit side.
+ * @param {object} m
+ * @returns {string[]} error messages (empty === valid)
+ */
+export function validateModalDefinition(m) {
+  if (!isPlainObject(m)) return ["modal must be an object"];
+  const errs = [];
+  if (!isNonEmptyString(m.modal_id)) errs.push("modal_id: required non-empty string");
+  if (!isNonEmptyString(m.title)) errs.push("title: required non-empty string");
+  if (!isNonEmptyString(m.callback_url)) errs.push("callback_url: required non-empty string");
+  if (!Array.isArray(m.fields) || m.fields.length === 0) {
+    errs.push("fields: required non-empty array");
+    return errs;
+  }
+  m.fields.forEach((f, i) => {
+    if (!isPlainObject(f)) { errs.push(`fields[${i}]: must be an object`); return; }
+    if (!isNonEmptyString(f.name)) errs.push(`fields[${i}].name: required non-empty string`);
+    if (!isNonEmptyString(f.label)) errs.push(`fields[${i}].label: required non-empty string`);
+    if (!MODAL_FIELD_TYPES.has(f.type)) {
+      errs.push(`fields[${i}].type: must be text|textarea|select (got ${JSON.stringify(f.type)})`);
+    }
+    if ("default_value" in f) {
+      errs.push(`fields[${i}].default_value: not a recognised key -- use \`value\` for the prefill (Nexus ignores default_value)`);
+    }
+    if (f.value !== undefined && typeof f.value !== "string") {
+      errs.push(`fields[${i}].value: must be a string when present`);
+    }
+    if (f.type === "select" && !Array.isArray(f.options)) {
+      errs.push(`fields[${i}].options: required array for select fields`);
+    }
+  });
+  return errs;
+}

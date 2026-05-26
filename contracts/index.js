@@ -16,13 +16,15 @@ export {
   validateChatMessage,
   validateButtonClick,
   validateModalSubmit,
+  validateModalDefinition,
 } from "./nexus-callbacks.js";
 
 import { chatMessageFixture } from "./fixtures/chat-message.js";
 import { buttonClickFixture } from "./fixtures/button-click.js";
 import { modalSubmitFixture } from "./fixtures/modal-submit.js";
+import { modalDefinitionFixture } from "./fixtures/modal-definition.js";
 
-export { chatMessageFixture, buttonClickFixture, modalSubmitFixture };
+export { chatMessageFixture, buttonClickFixture, modalSubmitFixture, modalDefinitionFixture };
 
 /** Valid fixtures keyed by callback type, for table-driven tests. */
 export const fixtures = {
