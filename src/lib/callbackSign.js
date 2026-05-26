@@ -91,3 +91,34 @@ export async function verifyNexusSignature(secret, rawBody, headers, options = {
 
   return timingSafeEqual(enc.encode(sig), enc.encode(expectedHex));
 }
+
+/**
+ * Sign a callback body exactly the way Nexus signs outbound bot callbacks --
+ * HMAC-SHA256 over "<unix-seconds>.<rawBody>", header value "sha256=<hex>".
+ * The inverse of {@link verifyNexusSignature}; used by the contract test
+ * harness to replay signed fixtures against a bot's real routes, and available
+ * to any commons-side sender. Wire-identical to nexus-app's signCallback.
+ *
+ * @param {string} secret - The per-bot HMAC signing secret
+ * @param {string} rawBody - The exact body string that will be POSTed
+ * @param {object} [options]
+ * @param {number} [options.timestamp] - Unix seconds override (default: now).
+ *   Pass a stale value to exercise replay-window rejection in tests.
+ * @returns {Promise<{ timestamp: string, signature: string }>}
+ */
+export async function signCallback(secret, rawBody, options = {}) {
+  const ts = String(options.timestamp ?? Math.floor(Date.now() / 1000));
+  const enc = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const sigBuf = await crypto.subtle.sign("HMAC", key, enc.encode(`${ts}.${rawBody}`));
+  const signature = "sha256=" + Array.from(new Uint8Array(sigBuf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return { timestamp: ts, signature };
+}

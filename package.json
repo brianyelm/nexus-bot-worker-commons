@@ -22,10 +22,12 @@
     "./lib/format": "./src/lib/format.js",
     "./lib/embedCard": "./src/lib/embedCard.js",
     "./lib/mimeEmail": "./src/lib/mimeEmail.js",
-    "./persona-blocks": "./src/persona-blocks/index.js"
+    "./persona-blocks": "./src/persona-blocks/index.js",
+    "./contracts": "./contracts/index.js"
   },
   "files": [
     "src/",
+    "contracts/",
     "migrations/",
     "SPEC.md",
     "README.md"
