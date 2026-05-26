@@ -458,7 +458,14 @@ export async function runLlmPipeline({
               "referent is almost always the most recent relevant thing you or they just posted in this " +
               "channel (an opportunity, quote, proposal, draft, invoice, document, or record). Resolve it " +
               "from the context above and act on THAT specific item. Only ask what they mean if the context " +
-              "genuinely does not make it clear. Do not repeat or summarize the context unprompted.";
+              "genuinely does not make it clear. Do not repeat or summarize the context unprompted." +
+              "\n\nFILES/ATTACHMENTS: this applies to files too. If the user refers to 'this/the/that " +
+              "statement, file, PDF, invoice, receipt, document, or attachment' and the CURRENT message " +
+              "has no attachment, do NOT ask them to re-attach -- look in the messages above for the most " +
+              "recently posted attachment (each is shown as `filename (mime, id=<uuid>)`) and use that " +
+              "`id` with the relevant tool. If nothing recent matches, call read_channel_history to look " +
+              "further back before giving up. Only ask the user to re-upload if no matching attachment " +
+              "exists anywhere in the recent history.";
           }
         }
       } catch (err) {
