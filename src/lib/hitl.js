@@ -40,8 +40,16 @@ const DEFAULT_DB_BINDING = "DB";
  * @returns {string}
  */
 function resolveWorkerBase(env, options) {
-  if (options.workerBaseUrlEnvVar) return env[options.workerBaseUrlEnvVar] || "";
-  return env.WORKER_BASE_URL || "";
+  const raw = (options.workerBaseUrlEnvVar ? env[options.workerBaseUrlEnvVar] : env.WORKER_BASE_URL) || "";
+  if (!raw) return "";
+  // Normalise to the bare origin. Some bots set this var to the FULL
+  // button-click URL (e.g. ".../api/internal/button-click"), and callers append
+  // their own path -- without this, the path doubles and the callback 404s.
+  try {
+    return new URL(raw).origin;
+  } catch {
+    return raw.replace(/\/+$/, "");
+  }
 }
 
 /**
