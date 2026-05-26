@@ -1091,10 +1091,16 @@ export async function handleChatMessage(request, env, ctx, config) {
   // @mention, no caption). Fall through to the LLM with a placeholder.
   let userText = stripMention(msgBody || "", config.botName);
   if (!userText) {
-    if (!hasAttachments) {
+    if (hasAttachments) {
+      userText = "(no caption -- please read the attached files)";
+    } else if (trigger_type === "mention") {
+      // A bare @mention with no other text is a "catch up and act" ping.
+      // Dispatch anyway and tell the LLM to read the recent channel messages
+      // -- the user pinged to point at what they just said, not to say nothing.
+      userText = "(I was @-mentioned with no other text -- read the recent messages in this channel and act on what was just asked.)";
+    } else {
       return json({ success: false, error: "Empty message after stripping mention" }, 400);
     }
-    userText = "(no caption -- please read the attached files)";
   }
 
   // ---- 6. !cmd dispatch (BEFORE the ambient gate) --------------------------
