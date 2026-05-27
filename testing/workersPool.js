@@ -15,14 +15,28 @@
  * bot's wrangler.toml; `bindings` injects the per-bot test secrets (Nexus key,
  * callback secret, Anthropic key) that aren't in wrangler.toml.
  *
+ * `serviceStubs` lists binding names for EXTERNAL service bindings (to other
+ * workers, e.g. MEMORY -> memory-worker) that don't exist in the isolated pool.
+ * workerd refuses to boot a worker whose declared service binding references an
+ * undefined service, so each is replaced with an in-host stub returning `{}`.
+ * (A self-binding like SELF -> this worker resolves on its own; don't stub it.)
+ * Pass `serviceStubResponse` to customise the stub body.
+ *
  * @param {object} params
  * @param {Record<string, string>} params.bindings - test-only env bindings
  * @param {string} [params.wranglerPath="./wrangler.toml"]
- * @returns {{ wrangler: { configPath: string }, miniflare: { bindings: Record<string,string> } }}
+ * @param {string[]} [params.serviceStubs=[]] - external service binding names to stub
+ * @param {string} [params.serviceStubResponse="{}"] - stub response body
+ * @returns {object} options for cloudflareTest(...)
  */
-export function workersPoolOptions({ bindings, wranglerPath = "./wrangler.toml" } = {}) {
-  return {
-    wrangler: { configPath: wranglerPath },
-    miniflare: { bindings: bindings || {} },
-  };
+export function workersPoolOptions({ bindings, wranglerPath = "./wrangler.toml", serviceStubs = [], serviceStubResponse = "{}" } = {}) {
+  const miniflare = { bindings: bindings || {} };
+  if (serviceStubs && serviceStubs.length) {
+    miniflare.serviceBindings = {};
+    for (const name of serviceStubs) {
+      miniflare.serviceBindings[name] = () =>
+        new Response(serviceStubResponse, { status: 200, headers: { "content-type": "application/json" } });
+    }
+  }
+  return { wrangler: { configPath: wranglerPath }, miniflare };
 }
