@@ -23,11 +23,13 @@
     "./lib/embedCard": "./src/lib/embedCard.js",
     "./lib/mimeEmail": "./src/lib/mimeEmail.js",
     "./persona-blocks": "./src/persona-blocks/index.js",
-    "./contracts": "./contracts/index.js"
+    "./contracts": "./contracts/index.js",
+    "./testing": "./testing/index.js"
   },
   "files": [
     "src/",
     "contracts/",
+    "testing/",
     "migrations/",
     "SPEC.md",
     "README.md"
