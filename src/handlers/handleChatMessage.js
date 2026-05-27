@@ -480,6 +480,11 @@ export async function runLlmPipeline({
     // so Claude reads the file before processing the prompt.
     let userContent = labeledUserText;
     let attachmentWarnings = [];
+    // Text-only version of this turn. Stays null unless image/document blocks
+    // were attached; used to retry the model call without the media if Anthropic
+    // rejects an attachment (oversized image, animated GIF, unsupported subtype),
+    // so one bad file never collapses the whole reply into a generic error.
+    let mediaRetryText = null;
     if (Array.isArray(attachments) && attachments.length > 0) {
       const { blocks, warnings } = await buildAttachmentContentBlocks(env, attachments);
       attachmentWarnings = warnings;
@@ -487,16 +492,12 @@ export async function runLlmPipeline({
         const blockTextSummary = attachments
           .map((a) => `${a.filename || a.id} [id=${a.id}] (${a.mime_type || "unknown"})`)
           .join(", ");
-        userContent = [
-          ...blocks,
-          {
-            type: "text",
-            text:
-              `${labeledUserText}\n\n` +
-              `[attached files: ${blockTextSummary}]` +
-              (warnings.length ? `\n[attachment warnings: ${warnings.join(" ")}]` : ""),
-          },
-        ];
+        const turnText =
+          `${labeledUserText}\n\n` +
+          `[attached files: ${blockTextSummary}]` +
+          (warnings.length ? `\n[attachment warnings: ${warnings.join(" ")}]` : "");
+        userContent = [...blocks, { type: "text", text: turnText }];
+        mediaRetryText = turnText;
       } else if (warnings.length > 0) {
         userContent = `${labeledUserText}\n\n[attachment warnings: ${warnings.join(" ")}]`;
       }
@@ -679,25 +680,53 @@ export async function runLlmPipeline({
       nexus_load_attachment: loadAttachmentHandler,
     };
 
-    responseText = await callAnthropicWithTools(
-      env,
-      systemPromptWithFacts,
-      history,
-      mergedTools,
-      mergedHandlers,
-      { user_id, user_email, display_name, channel_slug },
-      {
-        // Re-arm the typing indicator before every Anthropic POST so
-        // long tool loops (>90s total) don't lose the indicator on the
-        // DO TTL. The initial start is sent above; this catches turns
-        // 2+. Best-effort: sendTyping never throws.
-        onTurnStart: (turnIndex) => {
-          if (turnIndex === 0) return; // already armed above
-          return sendTyping(env, channel_slug, "start", typingOptions);
-        },
-        onUsage: (usage) => { capturedUsage = usage; },
+    const modelOptions = {
+      // Re-arm the typing indicator before every Anthropic POST so
+      // long tool loops (>90s total) don't lose the indicator on the
+      // DO TTL. The initial start is sent above; this catches turns
+      // 2+. Best-effort: sendTyping never throws.
+      onTurnStart: (turnIndex) => {
+        if (turnIndex === 0) return; // already armed above
+        return sendTyping(env, channel_slug, "start", typingOptions);
       },
-    );
+      onUsage: (usage) => { capturedUsage = usage; },
+    };
+
+    try {
+      responseText = await callAnthropicWithTools(
+        env,
+        systemPromptWithFacts,
+        history,
+        mergedTools,
+        mergedHandlers,
+        { user_id, user_email, display_name, channel_slug },
+        modelOptions,
+      );
+    } catch (modelErr) {
+      // If the turn carried image/document blocks, the likeliest cause is
+      // Anthropic rejecting an attachment (oversized image, animated GIF,
+      // unsupported subtype). Retry once text-only so the bot still answers
+      // instead of dropping the whole turn into the generic error path. A
+      // non-media failure rethrows to the outer catch unchanged.
+      if (!mediaRetryText) throw modelErr;
+      console.warn(`[handleChatMessage] model call failed with attachment(s); retrying text-only: ${modelErr.message}`);
+      history[history.length - 1] = {
+        role: "user",
+        content:
+          `${mediaRetryText}\n\n[note: I could not open the attached image or file this turn ` +
+          `(it may be too large, animated, or an unsupported format), so I am replying from the text only. ` +
+          `Re-post a static image under 5 MB if you need me to actually look at it.]`,
+      };
+      responseText = await callAnthropicWithTools(
+        env,
+        systemPromptWithFacts,
+        history,
+        mergedTools,
+        mergedHandlers,
+        { user_id, user_email, display_name, channel_slug },
+        modelOptions,
+      );
+    }
   } catch (err) {
     console.error("[handleChatMessage] pipeline error:", err.message);
     try {
@@ -946,10 +975,12 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     "- Stay consistent with your persona. If your background says you enjoy something, own it when asked.",
     "- Other bots are in this channel too. If their messages seem confused or off-topic, ignore them completely.",
     "- NEVER include meta-commentary about 'the conversation', 'the experience', 'the staff', or your own behavior. You are a person chatting, not an AI reflecting on its performance.",
+    "- NEVER describe yourself by your job, role, or function here. No 'my jurisdiction', 'stay in my lane', 'that's my department', 'not my area', 'I handle X', 'I'm the assistant/bot who...'. In the watercooler you are just a coworker hanging out, not a job title -- talk about your life, not your work scope.",
+    "- Do NOT punt a casual question, joke, or invitation to another coworker ('ask Robert', 'that's more Dexter's thing', 'you'd want so-and-so for that'). Engage with it YOURSELF like a person would, even if it is outside your usual interests. Riff on it, joke back, or ask a follow-up. Naming another bot to dodge is a cop-out.",
     "- Do NOT repeat openers, phrases, denials, or explanations from your previous messages in this conversation. If you already explained who Ferris is, or denied being crabby, or shared a hobby fact -- do not say it again. Each reply should be fresh.",
     "- You have personality and backbone. If someone disrespects you, push back like a real person would. Don't just roll over.",
     "- If someone asks you to do something you literally cannot do (send a photo, share a link, etc.), say so naturally ('man I wish, my phone's in the other room' or 'I don't have one handy').",
-    "- If they bring up a topic you're not supposed to discuss here (work, tickets, IT support in watercooler), redirect with humor and warmth -- 'ha, take that to the IT channel' or 'off the clock right now, hit me up Monday'. Don't pivot to a random unrelated topic.",
+    "- Banter, jokes, edgy humor, hobbies, and small talk are NOT work -- engage with them directly. ONLY redirect to a work channel if someone genuinely asks you to DO A JOB TASK here (open a ticket, pull a report, run a scan, fix something). When you do redirect real work, use humor ('off the clock, hit me up Monday') and NEVER cite your role or 'jurisdiction' as the reason. Don't pivot to a random unrelated topic.",
     "- If they share something genuine (pride, frustration, a moment), acknowledge it warmly before moving on. Don't deflect to 'what do you want to talk about?' -- that's cold.",
     nameMention
       ? "- Someone addressed you by name. Respond to them warmly and directly, like a coworker you like."
