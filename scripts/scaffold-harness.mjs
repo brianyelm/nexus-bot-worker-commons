@@ -206,11 +206,14 @@ it("base bindings are present in the test env", () => {
   });
 });`);
     if (routes.buttonClick) blocks.push(`describe("POST /api/internal/button-click", () => {
-  // 2xx (not exactly 202): an unrecognized button_id prefix returns 200
-  // handled:false; recognized-prefix behaviour is a per-bot side-effect test.
-  it("accepts a correctly-signed click (2xx)", async () => {
+  // The bot-agnostic guarantee is "authenticated (not 401) and no crash (<500)".
+  // The shared fixture's button_id is unrecognized by most bots -> some return
+  // 200 handled:false, 202 queued, or 400 unknown-prefix. Recognized-prefix
+  // success is a per-bot side-effect test.
+  it("accepts a correctly-signed click (authenticated)", async () => {
     const res = await postSigned(SELF, "/api/internal/button-click", fixtures["button-click"], SECRET);
-    expect(res.status).toBeLessThan(300);
+    expect(res.status).not.toBe(401);
+    expect(res.status).toBeLessThan(500);
   });
   it("rejects a tampered body (401)", async () => {
     const res = await postSigned(SELF, "/api/internal/button-click", fixtures["button-click"], SECRET, { tamper: true });
@@ -229,9 +232,10 @@ it("base bindings are present in the test env", () => {
     if (routes.modalSubmit) blocks.push(`describe("POST /api/internal/modal-submit", () => {
   // HMAC-level guard. A side-effect test (assert \`values\` persists) is
   // hand-written per bot -- see maxwell-worker/test/integration/modal-submit.test.js.
-  it("accepts a correctly-signed submit (2xx)", async () => {
+  it("accepts a correctly-signed submit (authenticated)", async () => {
     const res = await postSigned(SELF, "/api/internal/modal-submit", fixtures["modal-submit"], SECRET);
-    expect(res.status).toBeLessThan(300);
+    expect(res.status).not.toBe(401);
+    expect(res.status).toBeLessThan(500);
   });
   it("rejects an unsigned submit (401)", async () => {
     const res = await postUnsigned(SELF, "/api/internal/modal-submit", fixtures["modal-submit"]);
@@ -268,23 +272,25 @@ ${blocks.join("\n\n")}
       if (!anchor) {
         warn("could not find the `let cfToken;` anchor in deploy.mjs -- INSERT THE GATE BY HAND (copy maxwell-worker/scripts/deploy.mjs). Aborting gate step.");
       } else {
+        // Uses execSync (imported in every bot's deploy.mjs) so the gate works
+        // regardless of whether the script also imports spawnSync.
         const gate = `
 // Pre-deploy gate: run the test harness and refuse to ship on red. Emergency
 // override: \`npm run deploy -- --skip-tests\` (logged).
 if (!process.argv.includes('--skip-tests')) {
-  console.log('[deploy] pre-deploy gate: npm run test:all ...');
-  const gate = spawnSync('npm', ['run', 'test:all'], { stdio: 'inherit', shell: true });
-  if (gate.status !== 0) {
+  try {
+    console.log('[deploy] pre-deploy gate: npm run test:all ...');
+    execSync('npm run test:all', { stdio: 'inherit' });
+    console.log('[deploy] gate passed.');
+  } catch {
     console.error('[deploy] ABORTED -- tests failed. Fix the harness, or override with \`npm run deploy -- --skip-tests\` (logged).');
-    process.exit(gate.status ?? 1);
+    process.exit(1);
   }
-  console.log('[deploy] gate passed.');
 } else {
   console.warn('[deploy] WARNING: --skip-tests set -- deploying WITHOUT the test gate.');
 }
 
 `;
-        if (!src.includes("spawnSync")) warn("deploy.mjs does not import spawnSync -- verify the import line includes it");
         write(p, src.replace(/\nlet cfToken;/, `${gate}let cfToken;`));
       }
     }
