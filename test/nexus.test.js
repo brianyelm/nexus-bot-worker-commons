@@ -5,7 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { postToNexus } from "../src/lib/nexus.js";
+import { postToNexus, attachButtons } from "../src/lib/nexus.js";
 
 // Capture what postToNexus sends to fetch. We stub global fetch, run the
 // call, and assert on the body the worker emitted.
@@ -62,4 +62,73 @@ test("postToNexus passes through dash-free content unchanged", async () => {
 test("postToNexus coerces non-strings without throwing", async () => {
   const sent = await captureBody(12345);
   assert.equal(sent.body, "12345");
+});
+
+// ── attachButtons retry behavior ──────────────────────────────────────
+// A swallowed attach failure strands a button-less HITL card, so transient
+// faults (5xx / network) must be retried; permanent 4xx must short-circuit.
+
+const ATTACH_ENV = { NEXUS_BASE_URL: "https://nexus.example", TEST_KEY: "k" };
+const ATTACH_OPTS = { nexusKeyEnvVar: "TEST_KEY" };
+const ONE_BUTTON = [{ button_id: "approve:1", label: "Approve", callback_url: "https://b.example/cb" }];
+
+// Run attachButtons with a scripted sequence of fetch responses. setTimeout is
+// stubbed to fire immediately so backoff adds no real delay to the test.
+async function runAttach(responses) {
+  // Count only calls to the buttons route; reportFleetError fires its own
+  // fetch on persistent failure, which must not pollute the attempt count.
+  let callCount = 0;
+  const originalFetch = globalThis.fetch;
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (fn) => { fn(); return 0; };
+  globalThis.fetch = async (url) => {
+    if (!String(url).endsWith("/buttons")) {
+      return new Response(JSON.stringify({ data: { id: "x" } }), { status: 200 });
+    }
+    const r = responses[callCount] ?? responses[responses.length - 1];
+    callCount += 1;
+    if (r instanceof Error) throw r;
+    return new Response(JSON.stringify(r.json ?? {}), { status: r.status });
+  };
+  try {
+    const result = await attachButtons(ATTACH_ENV, "msg-1", ONE_BUTTON, ATTACH_OPTS);
+    return { result, callCount };
+  } finally {
+    globalThis.fetch = originalFetch;
+    globalThis.setTimeout = originalSetTimeout;
+  }
+}
+
+test("attachButtons retries a 503 then succeeds", async () => {
+  const { result, callCount } = await runAttach([
+    { status: 503, json: {} },
+    { status: 201, json: { data: [{ id: 1 }] } },
+  ]);
+  assert.equal(callCount, 2);
+  assert.deepEqual(result, [{ id: 1 }]);
+});
+
+test("attachButtons retries a network error then succeeds", async () => {
+  const { result, callCount } = await runAttach([
+    new Error("network unreachable"),
+    { status: 201, json: { data: [{ id: 2 }] } },
+  ]);
+  assert.equal(callCount, 2);
+  assert.deepEqual(result, [{ id: 2 }]);
+});
+
+test("attachButtons does NOT retry a permanent 400", async () => {
+  const { result, callCount } = await runAttach([
+    { status: 400, json: { error: "bad button" } },
+  ]);
+  assert.equal(callCount, 1);
+  assert.equal(result, null);
+});
+
+test("attachButtons gives up after 3 attempts on persistent 500", async () => {
+  const { result, callCount } = await runAttach([
+    { status: 500, json: {} },
+  ]);
+  assert.equal(callCount, 3);
+  assert.equal(result, null);
 });

@@ -166,6 +166,53 @@ async function _bearerPost(url, body, apiKey) {
 }
 
 /**
+ * Classify whether a thrown Nexus POST error is worth retrying. Network/timeout
+ * faults and 5xx/429 responses are transient; other 4xx are caller errors that
+ * will fail identically on retry.
+ *
+ * @param {Error} err
+ * @returns {boolean}
+ */
+function _isRetryableNexusError(err) {
+  const msg = err?.message || "";
+  const statusMatch = msg.match(/->\s(\d{3}):/);
+  if (statusMatch) {
+    const status = Number(statusMatch[1]);
+    return status === 429 || status >= 500;
+  }
+  // No HTTP status in the message => network error, timeout, or abort: retry.
+  return true;
+}
+
+/**
+ * POST JSON via Bearer auth with bounded retry on transient failures.
+ * Component-attach routes (buttons/modals) use this: a swallowed attach failure
+ * strands a button-less HITL card that an analyst cannot action, so a transient
+ * blip must not be the difference between a live card and a dead one. Permanent
+ * 4xx errors short-circuit immediately.
+ *
+ * @param {string} url
+ * @param {object} body
+ * @param {string} apiKey
+ * @param {number} [attempts=3] - total tries (1 initial + up to 2 retries)
+ * @returns {Promise<object>}
+ */
+async function _bearerPostWithRetry(url, body, apiKey, attempts = 3) {
+  let lastErr;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await _bearerPost(url, body, apiKey);
+    } catch (err) {
+      lastErr = err;
+      if (i === attempts - 1 || !_isRetryableNexusError(err)) break;
+      // Exponential backoff: 300ms then 900ms (~1.2s worst-case added latency).
+      await new Promise((resolve) => setTimeout(resolve, 300 * Math.pow(3, i)));
+    }
+  }
+  throw lastErr;
+}
+
+/**
  * Post a markdown message to a Nexus channel by slug.
  *
  * Default path: POST /api/bot/messages (the X-API-Key bot endpoint).
@@ -332,7 +379,7 @@ export async function attachButtons(env, messageId, buttons, options = {}) {
   }));
 
   try {
-    const result = await _bearerPost(
+    const result = await _bearerPostWithRetry(
       `${env.NEXUS_BASE_URL}/api/bot/messages/${messageId}/buttons`,
       { buttons: withSecret },
       apiKey,
@@ -381,7 +428,7 @@ export async function attachModals(env, messageId, modals, options = {}) {
   }));
 
   try {
-    const result = await _bearerPost(
+    const result = await _bearerPostWithRetry(
       `${env.NEXUS_BASE_URL}/api/bot/messages/${messageId}/modals`,
       { modals: withSecret },
       apiKey,
