@@ -37,6 +37,7 @@ import { rememberFact, forgetFact, listFacts, buildFactsBlock } from "../lib/mem
 import { persistTurnPair, resolveEntity } from "../lib/memoryService.js";
 import { callAnthropicWithTools, callAnthropic } from "../lib/anthropic.js";
 import { postToNexus, sendTyping, fetchChannelMessages, fetchThreadMessages } from "../lib/nexus.js";
+import { captureQa } from "../lib/qaCapture.js";
 import { postApprovalCard } from "../lib/hitl.js";
 import { withProvenance } from "../lib/provenanceContext.js";
 import { bangReport } from "../lib/embedCard.js";
@@ -843,6 +844,29 @@ export async function runLlmPipeline({
       }
     }
   }
+
+  // QA capture (best-effort, no LLM). Mirrors this chat turn to <bot>-qa for the
+  // daily fleet-healer review. Runs AFTER the reply is posted, so it adds no
+  // user-facing latency; self-gates on QA_CAPTURE_ENABLED and swallows its own
+  // errors, so it can never affect the conversation.
+  await captureQa(env, {
+    bot: config.botName,
+    kind: "chat.turn",
+    surface: "chat",
+    summary: visibleResponse || responseText || "",
+    detail: JSON.stringify({
+      user: (labeledUserText || "").slice(0, 600),
+      reply: (visibleResponse || "").slice(0, 600),
+      had_action: !!actionMatch,
+    }),
+    meta: {
+      channel: channel_slug,
+      user_id,
+      model: env.CLAUDE_MODEL || null,
+      input_tokens: capturedUsage?.input_tokens,
+      output_tokens: capturedUsage?.output_tokens,
+    },
+  }, { nexusKeyEnvVar: config.nexusKeyEnvVar });
 }
 
 const META_LEAK_PATTERNS = [
