@@ -18,7 +18,7 @@
 // =============================================================================
 
 import { postToNexus } from "./nexus.js";
-import { getProvenanceContext } from "./provenanceContext.js";
+import { getProvenanceContext, withProvenance } from "./provenanceContext.js";
 
 const MAX_SUMMARY = 120;
 const MAX_DETAIL = 1500;
@@ -83,6 +83,62 @@ export function buildQaEntry(fields = {}) {
  * @param {object} [options] - passthrough to postToNexus (nexusKeyEnvVar, provenance, ...)
  * @returns {Promise<void>}
  */
+/**
+ * Wrap a cron job invocation with QA capture in a single call. Replaces the
+ * common pattern
+ *
+ *   ctx.waitUntil(withProvenance("scheduled-cron", () => runX(env)));
+ *
+ * with
+ *
+ *   captureCronRun(env, ctx, { bot: "jacob", name: "runX", run: () => runX(env), cron });
+ *
+ * Standardizes cron QA across the fleet for bots that have no router.js seam.
+ * The no-op skip in captureQa keeps tight every-minute crons from flooding QA.
+ *
+ * @param {object} env
+ * @param {ExecutionContext} ctx
+ * @param {object} opts
+ * @param {string} opts.bot - bot name (used to derive slug + nexus key var)
+ * @param {string} opts.name - cron job name (becomes kind: `cron.${name}`)
+ * @param {Function} opts.run - 0-arg async fn that performs the cron work
+ * @param {string} [opts.cron] - cron string from event.cron (recorded in meta)
+ * @param {string} [opts.provenance="scheduled-cron"] - provenance scope
+ * @returns {void}
+ */
+export function captureCronRun(env, ctx, opts = {}) {
+  const { bot, name, run, cron, provenance = "scheduled-cron" } = opts;
+  if (typeof run !== "function") {
+    console.warn(`[captureCronRun] missing run fn for bot=${bot} name=${name}`);
+    return;
+  }
+  ctx.waitUntil((async () => {
+    try {
+      const r = await withProvenance(provenance, () => run());
+      await captureQa(env, {
+        bot,
+        kind: `cron.${name}`,
+        surface: "cron",
+        ok: true,
+        summary: `${name} ok`,
+        detail: JSON.stringify(r ?? null).slice(0, MAX_DETAIL),
+        meta: { cron },
+      });
+    } catch (err) {
+      console.error(`[cron] ${name} failed:`, err?.stack || err);
+      await captureQa(env, {
+        bot,
+        kind: `cron.${name}`,
+        surface: "cron",
+        ok: false,
+        summary: `${name} FAILED`,
+        detail: String(err?.message || err).slice(0, MAX_DETAIL),
+        meta: { cron },
+      });
+    }
+  })());
+}
+
 export async function captureQa(env, fields = {}, options = {}) {
   try {
     if (!env || env.QA_CAPTURE_ENABLED === "false") return;
