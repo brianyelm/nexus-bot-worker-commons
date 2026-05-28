@@ -24,6 +24,33 @@ const MAX_SUMMARY = 120;
 const MAX_DETAIL = 1500;
 
 /**
+ * Detect a no-op cron tick result. The dominant noise source in the fleet's
+ * QA channels is every-minute reminder-firing crons logging "fired:0, errors:0"
+ * 1440 times a day per bot. Suppress these so the daily analyzer sees real
+ * signal, not 99% empty ticks. Errors and non-cron surfaces are NEVER skipped.
+ *
+ * @param {string|undefined} surface
+ * @param {boolean} ok
+ * @param {string} detail - already-stringified detail field
+ * @returns {boolean}
+ */
+export function isNoopCronResult(surface, ok, detail) {
+  if (surface !== "cron") return false;
+  if (!ok) return false;
+  if (!detail || detail === "null" || detail === "{}" || detail === '""') return true;
+  // Match the canonical "{...fired:0...errors:0...}" shape that the router
+  // wrappers serialize when a reminder sweep had nothing to do.
+  const hasFired = /"fired"\s*:\s*\d+/.test(detail);
+  const hasErrors = /"errors"\s*:\s*\d+/.test(detail);
+  if (hasFired && hasErrors) {
+    const firedNonZero = /"fired"\s*:\s*[1-9]/.test(detail);
+    const errorsNonZero = /"errors"\s*:\s*[1-9]/.test(detail);
+    return !firedNonZero && !errorsNonZero;
+  }
+  return false;
+}
+
+/**
  * Build the QA channel entry (header + fenced JSON tail). Pure + testable.
  *
  * @param {object} fields - { bot, kind, summary, detail, meta?, surface?, ok?, ts? }
@@ -63,6 +90,17 @@ export async function captureQa(env, fields = {}, options = {}) {
     if (!bot) {
       console.warn("[captureQa] missing 'bot'; skipping");
       return;
+    }
+    // Suppress no-op cron ticks (the * * * * * reminder pollers that log
+    // "fired:0,errors:0" 1440 times a day per bot). Caller can override with
+    // options.forceCapture=true if every tick really matters.
+    if (!options.forceCapture) {
+      const detailStr = typeof fields.detail === "string"
+        ? fields.detail
+        : JSON.stringify(fields.detail ?? null);
+      if (isNoopCronResult(fields.surface, fields.ok !== false, detailStr)) {
+        return;
+      }
     }
     const slug = fields.channelSlug || `${bot}-qa`;
     const body = buildQaEntry(fields);

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildQaEntry } from "../src/lib/qaCapture.js";
+import { buildQaEntry, isNoopCronResult } from "../src/lib/qaCapture.js";
 
 function parseEntry(out) {
   const json = out.split("```qa\n")[1].split("\n```")[0];
@@ -58,4 +58,41 @@ test("buildQaEntry collapses whitespace in summary", () => {
   const out = buildQaEntry({ bot: "b", kind: "k", summary: "  multi\n  line   summary " });
   const parsed = parseEntry(out);
   assert.equal(parsed.summary, "multi line summary");
+});
+
+// --- isNoopCronResult ---------------------------------------------------------
+
+test("isNoopCronResult skips ok cron ticks with fired:0,errors:0", () => {
+  assert.equal(isNoopCronResult("cron", true, '{"fired":0,"errors":0}'), true);
+});
+
+test("isNoopCronResult does NOT skip when fired>0", () => {
+  assert.equal(isNoopCronResult("cron", true, '{"fired":3,"errors":0}'), false);
+});
+
+test("isNoopCronResult does NOT skip when errors>0", () => {
+  assert.equal(isNoopCronResult("cron", true, '{"fired":0,"errors":2}'), false);
+});
+
+test("isNoopCronResult does NOT skip failed ticks regardless of detail", () => {
+  // Failures are always interesting -- never suppress them.
+  assert.equal(isNoopCronResult("cron", false, '{"fired":0,"errors":0}'), false);
+});
+
+test("isNoopCronResult does NOT skip non-cron surfaces", () => {
+  // chat/tool/email/voice surfaces don't get the cron-noise filter.
+  assert.equal(isNoopCronResult("chat", true, '{"fired":0,"errors":0}'), false);
+  assert.equal(isNoopCronResult("tool", true, '{"fired":0,"errors":0}'), false);
+});
+
+test("isNoopCronResult skips truly-empty detail on cron ok ticks", () => {
+  assert.equal(isNoopCronResult("cron", true, "null"), true);
+  assert.equal(isNoopCronResult("cron", true, "{}"), true);
+  assert.equal(isNoopCronResult("cron", true, '""'), true);
+  assert.equal(isNoopCronResult("cron", true, ""), true);
+});
+
+test("isNoopCronResult does NOT skip detail with content but no fired/errors keys", () => {
+  // A cron that doesn't emit fired/errors counters is presumed meaningful.
+  assert.equal(isNoopCronResult("cron", true, '{"synced":12}'), false);
 });
