@@ -37,3 +37,125 @@ export function scrubFleetDashes(text) {
     .replace(/(?:&ndash;|&#8211;)/gi, "-")
     .replace(/,\s*,/g, ",");
 }
+
+// -----------------------------------------------------------------------------
+// Warn-only detectors. These do not rewrite -- they return booleans that
+// callers (postToNexus, qaCapture) record into QA telemetry so the daily
+// healing scorecard can call out non-conformant posts. Once the scorecard
+// shows fleet-wide compliance, postToNexus is free to start rejecting.
+// -----------------------------------------------------------------------------
+
+/**
+ * The PALETTE emoji codepoints, as a Set, for the freelance-emoji check.
+ * Built lazily so format.js's PALETTE update doesn't require a cycle.
+ *
+ * @type {Set<string>|null}
+ */
+let _paletteSet = null;
+function _loadPaletteSet() {
+  if (_paletteSet) return _paletteSet;
+  // Inlined snapshot of PALETTE values, kept in sync with format.js. Each
+  // emoji is the *value* the LLM is likely to produce; if format.js adds a
+  // key, mirror it here.
+  _paletteSet = new Set([
+    "📅","📧","✅","⏰","📝","💰",
+    "📊","🖥","🔍","⚠️","🚨","❌",
+    "🛡","🔓","🆕","⏳","🏁","🛑",
+    "💬","🎫","🔗",
+    // Deprecated keys retained so existing call sites don't trip the detector:
+    "🌤","📋","📈","👤",
+  ]);
+  return _paletteSet;
+}
+
+// Detect emoji *anywhere* in a string. Range covers the common pictographic
+// blocks; not exhaustive, intentionally loose. Used only as a filter before
+// the palette membership check.
+const EMOJI_RE = /\p{Extended_Pictographic}/gu;
+
+/**
+ * True if any `### **Title**` line contains an emoji that is NOT in the
+ * canonical PALETTE. Other lines (body bullets, etc.) are not inspected --
+ * one-emoji-per-section-header is the only enforced rule.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function detectFreelanceEmoji(text) {
+  if (typeof text !== "string" || !text) return false;
+  const palette = _loadPaletteSet();
+  const lines = text.split(/\r?\n/);
+  for (const line of lines) {
+    // Looking for "### " optionally with `**Title**` after; emoji typically
+    // sits between the `###` and the title text.
+    if (!/^#{2,3}\s/.test(line)) continue;
+    const matches = line.match(EMOJI_RE);
+    if (!matches) continue;
+    for (const m of matches) {
+      if (!palette.has(m)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * True if a line that looks like a bot-authored header is written as
+ * bare ALL-CAPS (e.g. "OPEN TICKETS:"). The style guide section 2 forbids
+ * this -- use `###` markdown headers instead.
+ *
+ * Heuristic: a standalone line that is 3+ words, all-uppercase with at most
+ * one trailing colon, and not a fenced-block marker.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function detectBareCapsHeader(text) {
+  if (typeof text !== "string" || !text) return false;
+  const lines = text.split(/\r?\n/);
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith("```")) continue;
+    if (line.startsWith("#")) continue;     // proper markdown header
+    if (line.startsWith(">")) continue;
+    if (line.startsWith("-") || line.startsWith("•")) continue;
+    // Drop trailing colon for the check.
+    const stripped = line.endsWith(":") ? line.slice(0, -1) : line;
+    if (stripped.length < 8) continue;       // too short to be a "header"
+    if (stripped.length > 80) continue;      // probably a sentence
+    // Must contain only A-Z, digits, spaces, and a few punctuation marks.
+    if (!/^[A-Z0-9 _'/\-&]+$/.test(stripped)) continue;
+    // At least one letter and at least two words.
+    if (!/[A-Z]/.test(stripped)) continue;
+    if (stripped.split(/\s+/).length < 2) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * True if the text contains any em-dash (U+2014) or en-dash (U+2013) --
+ * after scrubFleetDashes has already run, this should always be false. A
+ * hit means a code path bypassed the sanitizer.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function detectEmDashLeak(text) {
+  if (typeof text !== "string") return false;
+  return /[–—]/.test(text);
+}
+
+/**
+ * Bundle the three detectors for one-call telemetry from postToNexus.
+ *
+ * @param {string} text
+ * @returns {{has_em_dash:boolean, has_bare_caps:boolean, has_freelance_emoji:boolean}}
+ */
+export function inspectOutboundText(text) {
+  return {
+    has_em_dash: detectEmDashLeak(text),
+    has_bare_caps: detectBareCapsHeader(text),
+    has_freelance_emoji: detectFreelanceEmoji(text),
+  };
+}

@@ -20,13 +20,66 @@ test("buildQaEntry emits a header + parseable qa JSON block", () => {
   });
   assert.match(out, /^QA `tool\.xero_create_invoice` \| created DRAFT BRIT-1042\n```qa\n/);
   const parsed = parseEntry(out);
-  assert.equal(parsed.v, 1);
+  assert.equal(parsed.v, 2);
   assert.equal(parsed.bot, "maxwell");
   assert.equal(parsed.kind, "tool.xero_create_invoice");
   assert.equal(parsed.ok, true);
   assert.equal(parsed.surface, "chat");
   assert.equal(parsed.ts, "2026-05-26T14:03:01Z");
-  assert.deepEqual(parsed.meta, { model: "x" });
+  // v2 meta is the user-supplied fields plus the computed compliance signals.
+  assert.equal(parsed.meta.model, "x");
+  assert.equal(parsed.meta.format_mode, "chat");
+  assert.equal(parsed.meta.posted_via, "raw");
+  assert.equal(parsed.meta.has_em_dash, false);
+  assert.equal(parsed.meta.section_count, 0);
+});
+
+test("buildQaEntry v2 detects em-dash leak and rich format_mode", () => {
+  const out = buildQaEntry({
+    bot: "x", kind: "k",
+    detail: "## A Title\n\n### **Section**\nbody with an em — dash",
+    meta: { posted_via: "buildReport" },
+  });
+  const parsed = parseEntry(out);
+  assert.equal(parsed.meta.has_em_dash, true);
+  assert.equal(parsed.meta.section_count, 1);
+  assert.equal(parsed.meta.format_mode, "rich");
+  assert.equal(parsed.meta.posted_via, "buildReport");
+});
+
+test("buildQaEntry v2 maps postHitlCard postedVia to format_mode='hitl'", () => {
+  const out = buildQaEntry({
+    bot: "maxwell", kind: "vendor-reply",
+    detail: "## Vendor reply\n\n### **Original**\n> text",
+    meta: { posted_via: "postHitlCard" },
+  });
+  const parsed = parseEntry(out);
+  assert.equal(parsed.meta.format_mode, "hitl");
+});
+
+test("buildQaEntry v2 detects fenced bangReport", () => {
+  const out = buildQaEntry({
+    bot: "x", kind: "k",
+    detail: "```bangReport\nGET /health -> 530\n```",
+  });
+  const parsed = parseEntry(out);
+  assert.equal(parsed.meta.format_mode, "fenced");
+});
+
+test("buildQaEntry v2 carries button/modal violation counts from caller", () => {
+  const out = buildQaEntry({
+    bot: "x", kind: "k",
+    detail: "plain reply",
+    meta: {
+      button_label_violations: 2,
+      button_id_violations: 1,
+      modal_payload_shape: "fields",
+    },
+  });
+  const parsed = parseEntry(out);
+  assert.equal(parsed.meta.button_label_violations, 2);
+  assert.equal(parsed.meta.button_id_violations, 1);
+  assert.equal(parsed.meta.modal_payload_shape, "fields");
 });
 
 test("buildQaEntry caps summary + detail and defaults ok=true", () => {

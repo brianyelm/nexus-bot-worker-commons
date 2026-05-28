@@ -3,8 +3,62 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { scrubFleetDashes } from "../src/lib/sanitize.js";
+import {
+  scrubFleetDashes,
+  detectFreelanceEmoji,
+  detectBareCapsHeader,
+  detectEmDashLeak,
+  inspectOutboundText,
+} from "../src/lib/sanitize.js";
 import { buildMimeMessage } from "../src/lib/mimeEmail.js";
+
+test("detectEmDashLeak finds em-dashes and en-dashes", () => {
+  assert.equal(detectEmDashLeak("plain text"), false);
+  assert.equal(detectEmDashLeak("alpha — beta"), true);
+  assert.equal(detectEmDashLeak("1–5"), true);
+  assert.equal(detectEmDashLeak(""), false);
+  assert.equal(detectEmDashLeak(null), false);
+});
+
+test("detectFreelanceEmoji false for palette-only headers", () => {
+  assert.equal(detectFreelanceEmoji("### 📧 **Inbox** *(3)*"), false);
+  assert.equal(detectFreelanceEmoji("### 🛡 **Posture**"), false);
+});
+
+test("detectFreelanceEmoji true for non-palette emoji in header", () => {
+  // 🦄 is not in the palette
+  assert.equal(detectFreelanceEmoji("### 🦄 **Section**"), true);
+  assert.equal(detectFreelanceEmoji("## 🐍 Title"), true);
+});
+
+test("detectFreelanceEmoji ignores emoji outside headers", () => {
+  assert.equal(detectFreelanceEmoji("- some bullet with 🦄"), false);
+  assert.equal(detectFreelanceEmoji("plain prose with 🐍 in it"), false);
+});
+
+test("detectBareCapsHeader finds standalone ALL-CAPS labels", () => {
+  assert.equal(detectBareCapsHeader("OPEN TICKETS:\n- x"), true);
+  assert.equal(detectBareCapsHeader("DAILY SUMMARY"), true);
+});
+
+test("detectBareCapsHeader ignores proper markdown headers", () => {
+  assert.equal(detectBareCapsHeader("### **Open Tickets**"), false);
+  assert.equal(detectBareCapsHeader("## DAILY SUMMARY"), false);
+});
+
+test("detectBareCapsHeader ignores normal sentences", () => {
+  assert.equal(detectBareCapsHeader("This is a normal sentence."), false);
+  assert.equal(detectBareCapsHeader("- bullet with words"), false);
+});
+
+test("inspectOutboundText returns all three flags", () => {
+  const r = inspectOutboundText("OPEN TICKETS:\n### 🦄 **Section**\nalpha — beta");
+  assert.deepEqual(r, {
+    has_em_dash: true,
+    has_bare_caps: true,
+    has_freelance_emoji: true,
+  });
+});
 
 test("scrubFleetDashes replaces em-dash with comma-space", () => {
   assert.equal(scrubFleetDashes("alpha — beta"), "alpha, beta");

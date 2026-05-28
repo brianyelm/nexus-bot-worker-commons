@@ -404,23 +404,23 @@ export const PALETTE = Object.freeze({
   // Sections / digests
   SCHEDULE:   "📅",
   EMAIL:      "📧",
-  TASKS:      "✅",
   REMINDERS:  "⏰",
-  WEATHER:    "🌤",
   NOTES:      "📝",
-  PLANNER:    "📋",
+  MONEY:      "💰",
 
   // Metrics / state
   METRICS:    "📊",
-  TREND:      "📈",
-  MONEY:      "💰",
+  DEVICES:    "🖥",
   AUDIT:      "🔍",
 
   // Status
-  OK:         "✅",
+  STATUS_OK:  "✅",
+  OK:         "✅",   // alias of STATUS_OK; both names accepted
   WARN:       "⚠️",
   ALERT:      "🚨",
   ERROR:      "❌",
+  SECURITY:   "🛡",
+  BREACH:     "🔓",
 
   // Lifecycle
   NEW:        "🆕",
@@ -430,7 +430,15 @@ export const PALETTE = Object.freeze({
 
   // Comms
   MESSAGE:    "💬",
-  MENTION:    "👤",
   TICKET:     "🎫",
   LINK:       "🔗",
+
+  // DEPRECATED -- retained for backward compatibility with 6 known call
+  // sites (see git grep PALETTE.TASKS|PLANNER|WEATHER|TREND|MENTION). New
+  // code must NOT use these; the healer scorecard flags any addition.
+  TASKS:      "✅",
+  PLANNER:    "📋",
+  WEATHER:    "🌤",
+  TREND:      "📈",
+  MENTION:    "👤",
 });

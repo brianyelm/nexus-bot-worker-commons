@@ -1,0 +1,39 @@
+{
+  "_comment": "Approval-channel routing registry, consumed by routeApprovalChannel() in src/lib/channelRouter.js. Keys are 'bot:kind' (lowercase). Each entry resolves to a slug, optionally overridden by severity or clientId. Default when no entry matches: '<bot>-hitl'.",
+
+  "default": "{bot}-hitl",
+
+  "routes": {
+    "jacob:cadence-tick":         "jacob-hitl",
+    "jacob:partner-newsletter":   "jacob-hitl",
+    "jacob:hitl-test":            "jacob-hitl",
+    "jacob:breach-scan":          "jacob-hitl",
+
+    "maxwell:vendor-reply":       "maxwell-finance",
+    "maxwell:invoice-fix":        "maxwell-finance",
+    "maxwell:ap-bill":            "maxwell-finance",
+    "maxwell:bank-statement":     "maxwell-finance",
+    "maxwell:draft-invoice":      "maxwell-finance",
+
+    "courtney:external-reply":    "courtney-hitl",
+    "courtney:hello-email":       "courtney-hitl",
+    "courtney:onboarding-start":  "courtney-hitl",
+    "courtney:ack-ticket":        "courtney-hitl",
+
+    "dexter:drift":               "dexter-hitl",
+    "dexter:breach-scan":         "dexter-hitl",
+
+    "robert:incident":            "robert-hitl",
+    "robert:hunt":                "robert-hitl",
+    "robert:deep-dive":           "robert-hitl",
+
+    "wren:cadence":               "wren-hitl",
+
+    "kate:procurement":           "kate-hitl"
+  },
+
+  "severity_overrides": {
+    "_comment": "When a route also has a severity-aware destination (e.g. CRITICAL incidents go to a louder channel), list it here keyed by 'bot:kind:SEVERITY'.",
+    "robert:incident:CRITICAL":   "soc-notifications"
+  }
+}

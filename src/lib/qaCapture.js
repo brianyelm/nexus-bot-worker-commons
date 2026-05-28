@@ -19,9 +19,11 @@
 
 import { postToNexus } from "./nexus.js";
 import { getProvenanceContext, withProvenance } from "./provenanceContext.js";
+import { inspectOutboundText } from "./sanitize.js";
 
 const MAX_SUMMARY = 120;
 const MAX_DETAIL = 1500;
+const QA_SCHEMA_VERSION = 2;
 
 /**
  * Detect a no-op cron tick result. The dominant noise source in the fleet's
@@ -60,8 +62,15 @@ export function buildQaEntry(fields = {}) {
   const detailRaw = typeof fields.detail === "string"
     ? fields.detail
     : JSON.stringify(fields.detail ?? null);
+
+  // v2: enrich meta with format-compliance signals. The healer consumes
+  // these so it can score conformance without an LLM call per row.
+  const userMeta = (fields.meta && typeof fields.meta === "object") ? fields.meta : {};
+  const computedMeta = _computeComplianceMeta(detailRaw, userMeta);
+  const meta = { ...userMeta, ...computedMeta };
+
   const entry = {
-    v: 1,
+    v: QA_SCHEMA_VERSION,
     bot: fields.bot || "unknown",
     kind: fields.kind || "unknown",
     ts: fields.ts || new Date().toISOString(),
@@ -69,10 +78,48 @@ export function buildQaEntry(fields = {}) {
     ok: fields.ok !== false,
     summary: String(fields.summary ?? "").replace(/\s+/g, " ").trim().slice(0, MAX_SUMMARY),
     detail: detailRaw.slice(0, MAX_DETAIL),
-    meta: (fields.meta && typeof fields.meta === "object") ? fields.meta : {},
+    meta,
   };
   const header = `QA \`${entry.kind}\` | ${entry.summary || "(no summary)"}`;
   return `${header}\n\`\`\`qa\n${JSON.stringify(entry)}\n\`\`\``;
+}
+
+/**
+ * Compute the v2 format-compliance signals from the QA entry's detail body
+ * plus any caller-supplied counts (button violations, modal payload shape).
+ *
+ * @param {string} detailStr - the bot's outbound text being recorded
+ * @param {object} userMeta  - caller-provided meta (preserves their values)
+ * @returns {object}
+ */
+function _computeComplianceMeta(detailStr, userMeta = {}) {
+  const text = typeof detailStr === "string" ? detailStr : "";
+  const flags = inspectOutboundText(text);
+  const sectionCount = (text.match(/^###\s/gm) || []).length;
+  // format_mode inference:
+  //   "hitl"     -> caller set posted_via=postHitlCard
+  //   "rich"     -> has H2 (`## `) and isn't fenced; what buildReport emits
+  //   "fenced"   -> begins with a code fence (bangAlert/bangReport)
+  //   "chat"     -> otherwise (short replies, etc.)
+  let formatMode = userMeta.format_mode || null;
+  if (!formatMode) {
+    if (userMeta.posted_via === "postHitlCard") formatMode = "hitl";
+    else if (/^```/.test(text.trimStart())) formatMode = "fenced";
+    else if (/^## /m.test(text)) formatMode = "rich";
+    else formatMode = "chat";
+  }
+  return {
+    format_mode: formatMode,
+    posted_via: userMeta.posted_via || "raw",
+    has_em_dash: flags.has_em_dash,
+    has_bare_caps: flags.has_bare_caps,
+    has_freelance_emoji: flags.has_freelance_emoji,
+    section_count: sectionCount,
+    length_chars: text.length,
+    button_label_violations: Number(userMeta.button_label_violations || 0),
+    button_id_violations: Number(userMeta.button_id_violations || 0),
+    modal_payload_shape: userMeta.modal_payload_shape || "none",
+  };
 }
 
 /**

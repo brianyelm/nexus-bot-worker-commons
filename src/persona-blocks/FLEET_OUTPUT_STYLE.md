@@ -20,17 +20,34 @@ which case use the nearest of the two. See section 9.
 **One-sentence rule:** rich markdown when a human will skim it; fenced
 bangReport when a developer will read it.
 
-## 2. Section headers
+## 2. Titles, section headers, severity pills
 
-`### :palette_emoji: **Title** (N)`
+### Post title (one per message)
 
-- Exactly one emoji, drawn from the palette in section 7.
+`## :palette_emoji: Title -- Optional Qualifier `` `SEVERITY` ``
+
+- Use H2 (`##`) for the post title. Never H1, never bare-bold.
+- Optional leading emoji from the palette in section 8. One only.
+- Severity, when present, renders as a backtick inline-code chip at the
+  END of the title line: `` `CRITICAL` ``, `` `DEGRADED` ``, `` `STABLE` ``.
+  ALL-CAPS, single word. The Nexus renderer styles `h2 > code` and `h3 > code`
+  as small uppercase badges. Never parenthetical (`(CRITICAL)`) and never a
+  bracketed prefix (`[HIGH]`) -- those read as annotations, not signals.
+- Optional italic subtitle on the next line: `*one-sentence summary*`.
+
+### Section headers (zero or more per message)
+
+`### :palette_emoji: **Title** *(N)*`
+
+- Exactly one emoji, drawn from the palette in section 8.
 - Title in `**bold**`, sentence case. Never bare ALL-CAPS.
 - Optional `*(N)*` count after the title when the section is a list with a
   knowable size.
-- Never `#` H1 (renders too large in Nexus).
+- Never `####` or below -- if you need a sub-division, use sub-bullets.
 
-## 3. Lists
+## 3. Lists and quoted content
+
+### Lists
 
 - Bullets only. `-` or `•`. Never `*`, never numbered unless order matters.
 - One line per item. Long detail wraps to a sub-bullet (two-space indent),
@@ -39,6 +56,26 @@ bangReport when a developer will read it.
   Example: `**Acme renewal** _due Friday, $4,200 ARR_`.
 - Visible cap: 5 items per chat-reply section, 8 per report section.
   Overflow on its own line: `_+N more_`.
+- Empty list: a single line reading `None`. Use `All clear` only when the
+  section's purpose is a pure pass/fail security/posture signal.
+
+### Quoted content (emails being approved, vendor messages, etc.)
+
+- Short attribution + body (≤ 400 chars): use markdown blockquote with
+  `**From:** / **Subject:**` header lines and the body underneath:
+
+  ```
+  > **From:** vendor@example.com
+  > **Subject:** Invoice INV-4821 question
+  > They're asking whether net-30 applies to this invoice.
+  ```
+
+- Longer than ~400 chars: truncate the quoted body and append a
+  `_... (truncated, N chars omitted)_` line at the end of the blockquote.
+  The reviewer can ask for the full thread; do not paste it.
+- Reserve fenced code blocks for raw output that must survive as
+  copy-pasteable plain text (stack traces, JSON dumps, command output).
+  Human-readable email content does not belong in a fence.
 
 ## 4. Numbers, currency, dates
 
@@ -83,12 +120,24 @@ Import from commons:
 import { PALETTE } from "nexus-bot-worker-commons";
 ```
 
-Available keys: `SCHEDULE 📅, EMAIL 📧, TASKS ✅, REMINDERS ⏰, NOTES 📝,
-PLANNER 📋, METRICS 📊, TREND 📈, MONEY 💰, AUDIT 🔍, OK ✅, WARN ⚠️,
-ALERT 🚨, ERROR ❌, NEW 🆕, PENDING ⏳, DONE 🏁, BLOCKED 🛑, MESSAGE 💬,
-MENTION 👤, TICKET 🎫, LINK 🔗, WEATHER 🌤`.
+Available keys (21):
+
+```
+SCHEDULE 📅  EMAIL 📧  REMINDERS ⏰  NOTES 📝  MONEY 💰
+METRICS 📊  DEVICES 🖥  AUDIT 🔍  STATUS_OK ✅  WARN ⚠️
+ALERT 🚨  ERROR ❌  SECURITY 🛡  BREACH 🔓  NEW 🆕
+PENDING ⏳  DONE 🏁  BLOCKED 🛑  TICKET 🎫  LINK 🔗
+MESSAGE 💬
+```
+
+Removed in the 2026-05-27 revision: `TASKS` (duplicate glyph of `STATUS_OK`),
+`PLANNER` (superseded by `DEVICES`), `WEATHER`, `TREND`, `MENTION` -- all
+unused fleet-wide. Added: `SECURITY 🛡` for Robert, `BREACH 🔓` for Dexter
+breach alerts, `DEVICES 🖥` for endpoint/fleet sections.
 
 One emoji per section header. Never two in a row. Never inside list items.
+Emoji outside this palette in a `### **Title**` line is a fleet-rule
+violation and surfaces in the daily healing scorecard.
 
 ## 9. Chat reply rules
 
@@ -111,9 +160,13 @@ If a chat reply is under 240 chars and not a list, no markdown at all.
 - No em dashes or en dashes. Use `--` or `:` or a comma.
 - No action items without an owner mention.
 - No nested code fences. No code fence around prose.
+- No severity in parentheses or brackets in the title (`(CRITICAL)`,
+  `[HIGH]`). Use the inline-code pill described in section 2.
 - No filler ("Here is your report:", "Let me know if you need anything!").
 - No echoing the user's question back before answering.
 - No fenced bangReport for prose. Fences are monospace output, not emphasis.
+- No triple-backtick dumps of email content. Use the blockquote pattern
+  in section 3.
 - No making up names of people in Brian's life. Reference generically
   unless a specific name is in context.
 
@@ -173,6 +226,46 @@ You have 2 open:
 
 ```
 Megan owns it, 10:00 AM your time.
+```
+
+### HITL approval card
+
+```
+## 📧 Partner Newsletter -- June 2026
+
+*47 partners queued for delivery on approval*
+
+### 📌 **Draft subject**
+Raven Watch | June 2026 -- Service Spotlight
+
+### 📝 **Draft preview**
+> Service Spotlight: Managed Detection & Response. This month we are
+> featuring our MDR add-on for channel partners whose clients need
+> 24/7 SOC coverage without standing up their own team...
+
+---
+*Jacob · Newsletter approval · ready to send*
+```
+
+Buttons attach beneath via `postHitlCard` from commons. Button labels and
+ids are constrained to the canonical `BUTTON_LABELS` set, so the visible
+labels here are "Approve & Send" / "Edit" / "Skip Month" rendered by the
+helper, not freelanced at the call site.
+
+### Severity alert
+
+```
+## 🔓 Breach Alert -- Acme Corp `CRITICAL`
+
+*47 records across 3 sources, immediate review recommended*
+
+### 🔓 **Exposed credentials**
+- **Plaintext passwords:** 12
+- **High-severity credentials:** 4
+- **Emails exposed:** 12
+
+---
+*Dexter · Monthly breach scan · <t:1748386800:f>*
 ```
 
 ## 12. Why hybrid (do not flatten back to all-fenced)

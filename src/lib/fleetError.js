@@ -109,8 +109,10 @@ export async function reportFleetError(env, { bot, op, msg, ctx } = {}, options 
       }
     }
 
+    // Wrap ctx JSON in backticks so the renderer treats it as an inline
+    // code chip, visually separating it from the prose error line.
     const body = ctxStr
-      ? `\u{1F534} **${botName}** · \`${opStr}\` · ${msgStr}\nctx: ${ctxStr}`
+      ? `\u{1F534} **${botName}** · \`${opStr}\` · ${msgStr}\n   \`${ctxStr}\``
       : `\u{1F534} **${botName}** · \`${opStr}\` · ${msgStr}`;
 
     await postToNexus(env, FLEET_ERRORS_SLUG, body, { provenance: "system-alert", ...options });

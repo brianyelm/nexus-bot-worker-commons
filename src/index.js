@@ -37,9 +37,31 @@ export { rememberFact, forgetFact, listFacts, buildFactsBlock } from "./lib/memo
 export { postToNexus, uploadBotAttachment, attachButtons, attachModals, editNexusMessage, fetchChannelMessages, fetchThreadMessages, sendNexusHeartbeat, sendTyping, pingBotPresence } from "./lib/nexus.js";
 export { captureQa, captureCronRun, buildQaEntry, isNoopCronResult } from "./lib/qaCapture.js";
 export { withProvenance, getProvenanceContext } from "./lib/provenanceContext.js";
-export { scrubFleetDashes } from "./lib/sanitize.js";
+export {
+  scrubFleetDashes,
+  detectEmDashLeak,
+  detectBareCapsHeader,
+  detectFreelanceEmoji,
+  inspectOutboundText,
+} from "./lib/sanitize.js";
 export { reportFleetError } from "./lib/fleetError.js";
 export { postApprovalCard, processButtonClick } from "./lib/hitl.js";
+export { postHitlCard, renderHitlCard } from "./lib/hitlCard.js";
+export {
+  BUTTON_LABELS,
+  buttonId,
+  parseButtonId,
+  makeButton,
+  isCanonicalLabel,
+} from "./lib/buttonId.js";
+export {
+  parseInteractionPayload,
+  isLegacyFieldsPayload,
+} from "./lib/interactionPayload.js";
+export {
+  routeApprovalChannel,
+  getApprovalChannelRegistry,
+} from "./lib/channelRouter.js";
 export { makeShouldRespond } from "./lib/triggers.js";
 export { shouldChimeIn } from "./lib/watercooler.js";
 export {

@@ -120,13 +120,15 @@ function resolveCallbackSecret(env, options = {}) {
  * @param {string} apiKey
  * @returns {Promise<object>}
  */
-async function _post(url, body, apiKey) {
+async function _post(url, body, apiKey, extraHeaders = null) {
+  const headers = {
+    "Content-Type": "application/json",
+    "X-API-Key": apiKey,
+  };
+  if (extraHeaders) Object.assign(headers, extraHeaders);
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "X-API-Key": apiKey,
-    },
+    headers,
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
@@ -148,13 +150,15 @@ async function _post(url, body, apiKey) {
  * @param {string} apiKey
  * @returns {Promise<object>}
  */
-async function _bearerPost(url, body, apiKey) {
+async function _bearerPost(url, body, apiKey, extraHeaders = null) {
+  const headers = {
+    "Content-Type": "application/json",
+    "Authorization": `Bearer ${apiKey}`,
+  };
+  if (extraHeaders) Object.assign(headers, extraHeaders);
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${apiKey}`,
-    },
+    headers,
     body: JSON.stringify(body),
     signal: AbortSignal.timeout(TIMEOUT_MS),
   });
@@ -243,6 +247,12 @@ export async function postToNexus(env, slug, content, options = {}) {
     ? options.attachment_ids
     : null;
 
+  // postedVia identifies the helper that built the post (postHitlCard,
+  // buildReport, bangAlert, bangReport, fleetError, qaCapture). Hand-rolled
+  // posts default to "raw" and surface in the daily healing scorecard.
+  const postedVia = options.postedVia || "raw";
+  const extraHeaders = { "X-Bot-Posted-Via": postedVia };
+
   try {
     const provenance = options.provenance ?? getProvenanceContext() ?? null;
 
@@ -255,6 +265,7 @@ export async function postToNexus(env, slug, content, options = {}) {
         `${env.NEXUS_BASE_URL}/api/bot/channels/${encodeURIComponent(slug)}/messages`,
         payload,
         apiKey,
+        extraHeaders,
       );
       pingBotPresence(env, options).catch(() => {});
       return result?.data || null;
@@ -267,6 +278,7 @@ export async function postToNexus(env, slug, content, options = {}) {
       `${env.NEXUS_BASE_URL}/api/bot/messages`,
       payload,
       apiKey,
+      extraHeaders,
     );
     // Stamp presence fire-and-forget so the dot turns green. Do not await.
     pingBotPresence(env, options).catch(() => {});
