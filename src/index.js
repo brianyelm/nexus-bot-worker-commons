@@ -27,6 +27,7 @@
 
 export { handleChatMessage, runLlmPipeline, buildFoundationHandlers } from "./handlers/handleChatMessage.js";
 export { LlmRoomBase } from "./durable/LlmRoom.js";
+export { ReminderDOBase, scheduleReminderAlarm, bootstrapReminderAlarm } from "./durable/ReminderDOBase.js";
 export { handleCommandList, FOUNDATION_COMMAND_META } from "./handlers/handleCommandList.js";
 export { callAnthropic, callAnthropicWithTools } from "./lib/anthropic.js";
 export { verifyNexusSignature, timingSafeEqual } from "./lib/callbackSign.js";
