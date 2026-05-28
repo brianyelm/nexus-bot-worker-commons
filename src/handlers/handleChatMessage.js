@@ -795,6 +795,7 @@ export async function runLlmPipeline({
         }, {
           approvalSlug,
           nexusKeyEnvVar: config.nexusKeyEnvVar,
+          callbackSecretEnvVar: config.callbackSecretEnvVar,
           workerBaseUrlEnvVar: config.workerBaseUrlEnvVar || "WORKER_BASE_URL",
           dbBinding: config.dbBinding,
         });

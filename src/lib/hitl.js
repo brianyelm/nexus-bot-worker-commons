@@ -79,8 +79,15 @@ export async function postApprovalCard(env, params, options = {}) {
   const approvalSlug = options.approvalSlug;
   const dbKey = options.dbBinding || DEFAULT_DB_BINDING;
   const callbackUrl = `${resolveWorkerBase(env, options)}/api/internal/button-click`;
+  // callbackSecretEnvVar must be forwarded into nexusOptions so attachButtons
+  // stamps each button with callback_secret. Without it, Nexus persists
+  // callback_secret=NULL; the dispatcher's signCallback("") then throws in
+  // crypto.subtle.importKey and the click silently 500s with no audit row.
+  // (Burned 2026-05-28 on dexter-worker HITL approvals.)
   const nexusOptions = {
     nexusKeyEnvVar: options.nexusKeyEnvVar,
+    callbackSecretEnvVar: options.callbackSecretEnvVar,
+    callbackSecret: options.callbackSecret,
     provenance: "hitl-approval",
   };
 

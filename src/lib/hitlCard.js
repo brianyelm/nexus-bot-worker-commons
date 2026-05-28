@@ -76,6 +76,8 @@ export async function postHitlCard(env, params = {}) {
     requesterUserId,
     actionPayload,
     nexusKeyEnvVar,
+    callbackSecretEnvVar,
+    callbackSecret,
     dbBinding = DEFAULT_DB_BINDING,
   } = params;
 
@@ -99,6 +101,8 @@ export async function postHitlCard(env, params = {}) {
   // ---- Post -----------------------------------------------------------------
   const nexusOptions = {
     nexusKeyEnvVar,
+    callbackSecretEnvVar,
+    callbackSecret,
     provenance: "hitl-approval",
     postedVia: "postHitlCard",
   };
