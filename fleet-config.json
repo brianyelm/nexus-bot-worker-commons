@@ -1,0 +1,17 @@
+{
+  "CLAUDE_MODEL": "claude-sonnet-4-6",
+  "M365_TENANT_ID": "cfd2f2a1-158f-400e-ae14-ac8ca8086d6b",
+  "ALLOWED_DOMAIN": "blackravenit.com",
+  "S1_ACCOUNT_ID": "2403937513844951240",
+  "GA4_PROPERTY_ID": "517893931",
+  "PAGE_FROM_NUMBER": "+18009508330",
+  "VAPID_PUBLIC_KEY": "BE77c9S6mCWcz_Q8JQa9vSXM-BR_wnBAZydOiYGSrVlWvsVcUJG56V-TvJ48NeAQ7V15Eh19QNpw77lZTRj1b1U",
+  "VAPID_SUBJECT": "mailto:admin@blackravenit.com",
+  "KB_API_URL": "https://kb.blackravenit.com",
+  "SALES_API_URL": "https://sales.blackravenit.com",
+  "NINJA_BASE_URL": "https://us2.ninjarmm.com",
+  "NEXUS_URL": "https://nexus.blackravenit.com",
+  "PAX8_CLIENT_ID": "2YZUoVVbjUv7YRhzVJtb0f1v1wyi8Dlm",
+  "NINJA_CLIENT_ID": "rCMbQrtCljnvANsWZ2XwvZoO1ec",
+  "BOX_CLIENT_ID": "1j19rklrg6oh4tswzm7b638p5xv1kq8i"
+}
