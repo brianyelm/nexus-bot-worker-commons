@@ -148,7 +148,7 @@ export async function endMemorySession(env, botId, sessionId, summary) {
 /**
  * Assert a structured fact about an entity.
  */
-export async function assertFact(env, botId, { subjectId, predicate, object, confidence, sourceTurnId }) {
+export async function assertFact(env, botId, { subjectId, predicate, object, confidence, sourceTurnId, critical, ttlDays }) {
   if (!env.MEMORY) return null;
   return await memoryFetch(env, botId, '/facts', {
     subject_id: subjectId,
@@ -156,6 +156,10 @@ export async function assertFact(env, botId, { subjectId, predicate, object, con
     object,
     confidence: confidence || 1.0,
     source_turn_id: sourceTurnId || null,
+    // When critical is true the memory-worker stores the fact with no expiry
+    // (kept indefinitely); otherwise it applies the default 90-day retention.
+    critical: critical === true ? true : undefined,
+    ttl_days: Number(ttlDays) > 0 ? Number(ttlDays) : undefined,
   });
 }
 

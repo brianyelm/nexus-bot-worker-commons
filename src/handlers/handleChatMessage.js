@@ -34,7 +34,7 @@ import { verifyNexusSignature } from "../lib/callbackSign.js";
 import { parseCommand } from "../lib/commandParser.js";
 import { loadHistory, appendHistory } from "../lib/history.js";
 import { rememberFact, forgetFact, listFacts, buildFactsBlock } from "../lib/memory.js";
-import { persistTurnPair, resolveEntity, getEntityContext } from "../lib/memoryService.js";
+import { persistTurnPair, resolveEntity, getEntityContext, assertFact } from "../lib/memoryService.js";
 import { callAnthropicWithTools, callAnthropic } from "../lib/anthropic.js";
 import { postToNexus, sendTyping, fetchChannelMessages, fetchThreadMessages } from "../lib/nexus.js";
 import { captureQa } from "../lib/qaCapture.js";
@@ -829,11 +829,66 @@ export async function runLlmPipeline({
       }
     };
 
-    const mergedTools = [...(config.tools.definitions || []), channelHistoryTool, loadAttachmentTool];
+    // Explicit "remember this" tool. When the user asks the bot to remember
+    // something ("remember that X", "note that ...", "for next time ..."), the
+    // bot saves it as a durable fact in the shared cross-surface memory so it
+    // recalls it in future chats, voice calls, and phone calls -- not just the
+    // current window. General notes keep ~90 days; important client/account info
+    // (important=true) is kept indefinitely. No-op if MEMORY is unbound.
+    const rememberTool = {
+      name: "remember",
+      description:
+        "Durably remember a fact the user explicitly asks you to remember (e.g. 'remember that...', " +
+        "'note that...', 'for next time...'). Saves it to your long-term cross-surface memory so you " +
+        "recall it in future conversations, voice calls, and phone calls. Use ONLY when the user clearly " +
+        "wants something remembered. Set important=true for durable client/account info that must be kept " +
+        "indefinitely; general personal notes are kept about 90 days.",
+      input_schema: {
+        type: "object",
+        properties: {
+          fact: { type: "string", description: "The thing to remember, as a clear standalone statement." },
+          subject: { type: "string", description: "Optional: who or what this is about (a person, client, or account), if not obvious from the fact." },
+          important: { type: "boolean", description: "True if this is durable client/account information that should never expire." },
+        },
+        required: ["fact"],
+      },
+    };
+    const rememberHandler = async (input) => {
+      if (!env.MEMORY) return { error: "Long-term memory is not available for this bot." };
+      const factText = String(input?.fact || "").trim();
+      if (!factText) return { error: "Nothing to remember -- 'fact' is required." };
+      let entityId = memEntityId;
+      if (!entityId) {
+        try {
+          entityId = await resolveEntity(env, config.botName, { userId: user_id, displayName: display_name });
+        } catch { /* fall through */ }
+      }
+      if (!entityId) return { error: "Could not resolve who to remember this for." };
+      const object = input?.subject ? `${String(input.subject).trim()}: ${factText}` : factText;
+      try {
+        await assertFact(env, config.botName, {
+          subjectId: entityId,
+          predicate: "note",
+          object: object.slice(0, 500),
+          confidence: 1,
+          critical: input?.important === true,
+        });
+        return {
+          ok: true,
+          remembered: object.slice(0, 200),
+          retention: input?.important === true ? "kept indefinitely" : "kept about 90 days",
+        };
+      } catch (err) {
+        return { error: `Could not save that: ${err?.message || String(err)}` };
+      }
+    };
+
+    const mergedTools = [...(config.tools.definitions || []), channelHistoryTool, loadAttachmentTool, rememberTool];
     const mergedHandlers = {
       ...(config.tools.handlers || {}),
       read_channel_history: channelHistoryHandler,
       nexus_load_attachment: loadAttachmentHandler,
+      remember: rememberHandler,
     };
 
     const modelOptions = {
