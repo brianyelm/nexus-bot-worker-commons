@@ -196,6 +196,10 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
  *   the initial call, then increments per tool-loop iteration. Used by
  *   handleChatMessage to re-arm the Nexus typing indicator across long
  *   tool loops (the indicator has a 90s TTL on the Nexus DO).
+ * @param {(name: string, input: object, isError: boolean) => void} [options.onToolCall]
+ *   Hook called once per executed tool_use block (after the handler runs).
+ *   Used to accumulate an action breadcrumb for conversation memory. Errors
+ *   in the hook are caught and never break the tool loop.
  * @returns {Promise<string>} Final assistant text
  */
 export async function callAnthropicWithTools(env, systemPrompt, messages, tools, handlers, ctx = {}, options = {}) {
@@ -277,6 +281,17 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
       };
       if (isError) result.is_error = true;
       toolResults.push(result);
+
+      // Surface each executed tool call so callers can build an action
+      // breadcrumb for conversation memory. Best-effort: a throwing hook
+      // must never break the tool loop.
+      if (typeof options.onToolCall === "function") {
+        try {
+          options.onToolCall(block.name, block.input, isError);
+        } catch (err) {
+          console.warn("[anthropic] onToolCall hook failed:", err.message);
+        }
+      }
     }
 
     workingMessages.push({ role: "user", content: toolResults });

@@ -44,6 +44,7 @@ import { bangReport } from "../lib/embedCard.js";
 import { buildAttachmentContentBlocks } from "../lib/attachments.js";
 import { shouldChimeIn } from "../lib/watercooler.js";
 import { phoenixToday } from "../lib/format.js";
+import { buildActionBreadcrumb, looksLikeUnbackedClaim } from "../lib/actionTrace.js";
 
 // Detect GIF-only messages so bots receive "[GIF image: <url>]" instead of
 // a bare CDN URL they cannot interpret.
@@ -353,6 +354,9 @@ export async function runLlmPipeline({
   let responseText;
   let capturedUsage = null;
   let history;
+  // Trace of tool calls executed this turn (name + input + error flag), used
+  // to build an action breadcrumb for memory and to flag unbacked claims.
+  const toolTrace = [];
 
   // "<bot> is typing..." indicator. Nexus dispatch already fires a
   // typing-start before invoking us, but the dispatch-side indicator
@@ -474,6 +478,58 @@ export async function runLlmPipeline({
       }
     }
 
+    // HITL approval-queue context. HITL cards the bot stages (email drafts,
+    // scheduling commits, etc.) are posted to a SEPARATE approval channel
+    // (config.approvalSlug, e.g. #wren-hitl), which the per-channel context
+    // fetch above never sees. Without this, a bot chatting in its own
+    // #<bot>-assistant channel has no idea what it just staged for approval,
+    // and draws a blank when the user says "cancel that draft" or "did you
+    // send the email?". Pull the most recent cards from the approval channel
+    // so the chat-side bot can reason about its own pending actions. Default
+    // ON; opt out with config.hitlContext = { enabled: false }. Skipped when
+    // the user is already chatting IN the approval channel (avoids a
+    // duplicate of the per-channel context fetch).
+    let hitlContextBlock = "";
+    const hitlCtxEnabled = config.hitlContext?.enabled !== false;
+    const hitlCtxSlug = config.approvalSlug;
+    const hitlCtxLimit = config.hitlContext?.limit ?? 8;
+    if (hitlCtxEnabled && hitlCtxSlug && hitlCtxSlug !== channel_slug) {
+      try {
+        const hitlMsgs = await fetchChannelMessages(env, hitlCtxSlug, {
+          ...nexusOptions,
+          limit: hitlCtxLimit,
+        });
+        if (hitlMsgs && hitlMsgs.length > 0) {
+          const lines = hitlMsgs
+            .map((m) => {
+              const who = m.display_name || m.user_id || "system";
+              let ts = "";
+              if (m.created_at !== undefined && m.created_at !== null) {
+                const d = new Date(m.created_at);
+                if (!Number.isNaN(d.getTime())) ts = d.toISOString().slice(5, 16).replace("T", " ");
+              }
+              const body = (m.body || "").replace(/\s+/g, " ").slice(0, 280);
+              return `[${ts}] ${who}: ${body}`;
+            })
+            .filter((l) => l.trim());
+          if (lines.length > 0) {
+            hitlContextBlock =
+              "\n\nYOUR APPROVAL QUEUE (#" + hitlCtxSlug + ") -- recent cards you staged for " +
+              "the user to Approve or Deny, newest last. These are actions YOU already took " +
+              "(drafted an email, queued a schedule change, etc.) that are waiting on a decision:\n" +
+              lines.join("\n") +
+              "\n\nIf the user refers to 'the email', 'that draft', 'the card', 'your HITL', 'the " +
+              "approval', or asks to cancel / approve / change / resend a pending action, it almost " +
+              "certainly refers to one of these. Do NOT claim you cannot find it or that it does not " +
+              "exist; reason from this list. You cannot programmatically cancel a staged card -- the " +
+              "user denies it from #" + hitlCtxSlug + " -- so say that plainly when asked to cancel.";
+          }
+        }
+      } catch (err) {
+        console.warn("[handleChatMessage] HITL context fetch failed:", err.message);
+      }
+    }
+
     // Multimodal hand-off. If Nexus surfaced any attachments on this turn,
     // fetch each one through the internal-token route, base64-encode, and
     // prepend as `document` / `image` content blocks BEFORE the text body
@@ -533,7 +589,23 @@ export async function runLlmPipeline({
       `\n- Local time right now: ${today.time}.` +
       `\n- ISO date: ${today.iso}. ISO 8601: ${today.iso8601}.` +
       `\n- When asked what day/time it is, or when computing schedules, reports, due dates, or "today/yesterday/tomorrow", USE THIS. Do not use UTC. Do not use your training cutoff.`;
-    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_TODAY + NEXUS_MENTION_RULE + threadContextBlock + channelContextBlock;
+    // Act-vs-claim integrity. The bot must never report success for an action
+    // it did not actually take via a tool call. This is the rule behind two
+    // recurring failures: claiming "done, added those reminders" with no tool
+    // call, and forgetting it had drafted/staged something a turn earlier.
+    const NEXUS_ACTION_INTEGRITY =
+      "\n\nACTING VS. CLAIMING (critical, overrides politeness):" +
+      "\n- Only say you have DONE something (sent, added, created, scheduled, saved, set, staged," +
+      " updated, deleted, emailed, booked, reminded) AFTER the matching tool call has returned" +
+      " successfully on THIS turn. If you have not called the tool, do not say it is done -- either" +
+      " call it now, or tell the user plainly what is still outstanding." +
+      "\n- When the user hands you several items at once (e.g. 'remind me to reach out to these four" +
+      " clients'), act on EVERY item with the right tool, then confirm the count. Never acknowledge" +
+      " in prose and silently skip the tool calls." +
+      "\n- Lines beginning with '[actions you actually performed' in the history are your own private" +
+      " record of what you really did on earlier turns. Trust them over your memory of the prose. If" +
+      " there is no such line for an action, assume you did NOT do it and do not claim you did.";
+    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + threadContextBlock + channelContextBlock + hitlContextBlock;
 
     const channelHistoryTool = {
       name: "read_channel_history",
@@ -690,6 +762,12 @@ export async function runLlmPipeline({
         return sendTyping(env, channel_slug, "start", typingOptions);
       },
       onUsage: (usage) => { capturedUsage = usage; },
+      // Record each executed tool call so we can persist an action
+      // breadcrumb into history (conversation memory) and detect replies
+      // that claim success without a backing write tool.
+      onToolCall: (name, input, isError) => {
+        toolTrace.push({ name, input, isError });
+      },
     };
 
     try {
@@ -774,6 +852,9 @@ export async function runLlmPipeline({
   // ---- <action> block detection --------------------------------------------
   const actionMatch = responseText.match(actionRegex);
   let visibleResponse = responseText;
+  // Descriptor of a HITL card staged this turn, recorded into the action
+  // breadcrumb so the bot remembers next turn that it queued something.
+  let stagedAction = null;
 
   if (actionMatch) {
     let action = null;
@@ -799,6 +880,10 @@ export async function runLlmPipeline({
           workerBaseUrlEnvVar: config.workerBaseUrlEnvVar || "WORKER_BASE_URL",
           dbBinding: config.dbBinding,
         });
+        stagedAction = {
+          description: action.description || action.type || "action",
+          channel: approvalSlug,
+        };
         if (!visibleResponse) {
           await postToNexus(
             env,
@@ -813,6 +898,14 @@ export async function runLlmPipeline({
     }
   }
 
+  // Defensive: the action breadcrumb we persist into history is labelled as a
+  // private memory note, but a model can mimic patterns it sees in its own
+  // prior turns. Strip any breadcrumb-style line from the VISIBLE reply so the
+  // user never sees one even if the model regurgitates the format.
+  visibleResponse = visibleResponse
+    .replace(/^\s*\[actions you actually performed[^\]]*\]\s*$/gim, "")
+    .trim();
+
   // ---- Persist + post final response ---------------------------------------
   // Persist a text-only marker of the attachments so future turns retain the
   // breadcrumb that a file was present even though the bytes themselves are
@@ -821,9 +914,18 @@ export async function runLlmPipeline({
   const attachmentBreadcrumb = Array.isArray(attachments) && attachments.length > 0
     ? `\n[attached on this turn: ${attachments.map((a) => `${a.filename || a.id} (${a.mime_type || "?"})`).join(", ")}]`
     : "";
+  // Action breadcrumb: a compact, privacy-conscious record of what the bot
+  // actually DID this turn (tool calls + any staged HITL card), appended to
+  // the assistant turn in history only. It is never posted to Nexus, so the
+  // user never sees it, but the bot reads it back next turn and stops
+  // forgetting its own actions / claiming things it never did.
+  const actionBreadcrumb = buildActionBreadcrumb(toolTrace, stagedAction);
+  const assistantMemory = actionBreadcrumb
+    ? `${responseText}\n\n${actionBreadcrumb}`
+    : responseText;
   try {
     await appendHistory(env, historyKey, "user", labeledUserText + attachmentBreadcrumb, { dbBinding: config.dbBinding });
-    await appendHistory(env, historyKey, "assistant", responseText, { dbBinding: config.dbBinding });
+    await appendHistory(env, historyKey, "assistant", assistantMemory, { dbBinding: config.dbBinding });
   } catch (err) {
     console.error("[handleChatMessage] history persist error:", err.message);
   }
@@ -888,6 +990,11 @@ export async function runLlmPipeline({
       user: (labeledUserText || "").slice(0, 600),
       reply: (visibleResponse || "").slice(0, 600),
       had_action: !!actionMatch,
+      tools_called: toolTrace.map((t) => t.name),
+      // Reply asserts success but no write tool ran this turn -- the
+      // "said done, did nothing" failure. Surfaced for fleet-healer QA
+      // review, never used to suppress the reply.
+      claimed_without_action: looksLikeUnbackedClaim(visibleResponse, toolTrace),
     }),
     meta: {
       channel: channel_slug,
