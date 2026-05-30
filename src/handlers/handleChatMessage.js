@@ -34,7 +34,7 @@ import { verifyNexusSignature } from "../lib/callbackSign.js";
 import { parseCommand } from "../lib/commandParser.js";
 import { loadHistory, appendHistory } from "../lib/history.js";
 import { rememberFact, forgetFact, listFacts, buildFactsBlock } from "../lib/memory.js";
-import { persistTurnPair, resolveEntity } from "../lib/memoryService.js";
+import { persistTurnPair, resolveEntity, getEntityContext } from "../lib/memoryService.js";
 import { callAnthropicWithTools, callAnthropic } from "../lib/anthropic.js";
 import { postToNexus, sendTyping, fetchChannelMessages, fetchThreadMessages } from "../lib/nexus.js";
 import { captureQa } from "../lib/qaCapture.js";
@@ -103,6 +103,66 @@ function annotateGifBody(body) {
     return `[GIF image: ${trimmed}]`;
   }
   return body;
+}
+
+/**
+ * Build a compact "what you remember about this person" block from a
+ * memory-worker /context payload. Surfaces durable facts, recent cross-surface
+ * turns (chat + Nexus voice + Twilio phone all flow into the same entity), and
+ * recent session summaries -- EXCLUDING the current chat session, whose turns
+ * the per-user chat_history already carries. Bounded and best-effort; returns
+ * "" when there is nothing worth injecting.
+ *
+ * @param {object|null} ctx - memory-worker /context response
+ * @param {string} currentSessionId - historyKey of the live chat session
+ * @returns {string}
+ */
+function buildMemoryRecallBlock(ctx, currentSessionId) {
+  if (!ctx) return "";
+  const lines = [];
+
+  const facts = Array.isArray(ctx.facts) ? ctx.facts : [];
+  const factLines = facts
+    .filter((f) => f && f.predicate && f.object)
+    .slice(0, 15)
+    .map((f) => `- ${String(f.predicate).replace(/_/g, " ")}: ${f.object}`);
+  if (factLines.length) {
+    lines.push("Known facts:");
+    lines.push(...factLines);
+  }
+
+  // Cross-surface turns: keep ones NOT from the current chat session (those are
+  // already in the immediate history). Voice/phone turns carry their own
+  // session ids, so this is where past calls surface.
+  const turns = (Array.isArray(ctx.recent_turns) ? ctx.recent_turns : [])
+    .filter((t) => t && t.content && t.session_id !== currentSessionId);
+  if (turns.length) {
+    if (lines.length) lines.push("");
+    lines.push("Earlier across chat/voice/phone (oldest to newest):");
+    for (const t of turns.slice(-12)) {
+      const who = t.role === "assistant" ? "you" : "them";
+      const where = t.channel ? ` (${t.channel})` : "";
+      lines.push(`- ${who}${where}: ${String(t.content).replace(/\s+/g, " ").slice(0, 200)}`);
+    }
+  }
+
+  const summaries = (Array.isArray(ctx.recent_sessions) ? ctx.recent_sessions : [])
+    .filter((s) => s && s.summary);
+  if (summaries.length) {
+    if (lines.length) lines.push("");
+    lines.push("Recent conversation summaries:");
+    for (const s of summaries.slice(0, 3)) {
+      const where = s.channel ? `${s.channel}: ` : "";
+      lines.push(`- ${where}${String(s.summary).replace(/\s+/g, " ").slice(0, 300)}`);
+    }
+  }
+
+  if (!lines.length) return "";
+  return (
+    "\n\nWHAT YOU REMEMBER ABOUT THIS PERSON (your shared memory across chat, voice calls, and phone calls -- " +
+    "use it naturally for continuity; do NOT recite it verbatim or say you looked it up):\n" +
+    lines.join("\n")
+  );
 }
 
 // Foundation command verbs built per-request (need env + user context)
@@ -354,6 +414,10 @@ export async function runLlmPipeline({
   let responseText;
   let capturedUsage = null;
   let history;
+  // Cross-surface memory entity for this person, resolved once per turn and
+  // reused for both recall (inject what we know) and persistence (tag this
+  // turn so future recall finds it). Null when MEMORY is unbound.
+  let memEntityId = null;
   // Trace of tool calls executed this turn (name + input + error flag), used
   // to build an action breadcrumb for memory and to flag unbacked claims.
   const toolTrace = [];
@@ -562,6 +626,26 @@ export async function runLlmPipeline({
     history.push({ role: "user", content: userContent });
 
     const factsBlock = await buildFactsBlock(env, user_id, { dbBinding: config.dbBinding });
+
+    // Cross-surface memory recall. Everything this bot hears -- chat, Nexus
+    // voice, and Twilio phone -- is persisted to the memory-worker keyed by the
+    // same per-person entity. Resolve the entity now so we can (a) inject what
+    // we already know about them and (b) tag this turn's persisted memory with
+    // the entity for future recall. Best-effort; no-op when MEMORY is unbound or
+    // recall is disabled via config.memoryRecall = { enabled: false }.
+    let memoryRecallBlock = "";
+    if (env.MEMORY && config.botName && config.memoryRecall?.enabled !== false) {
+      try {
+        memEntityId = await resolveEntity(env, config.botName, { userId: user_id, displayName: display_name });
+        if (memEntityId) {
+          const memCtx = await getEntityContext(env, config.botName, memEntityId, userText);
+          memoryRecallBlock = buildMemoryRecallBlock(memCtx, historyKey);
+        }
+      } catch (err) {
+        console.warn("[handleChatMessage] memory recall failed:", err?.message);
+      }
+    }
+
     const NEXUS_CONTEXT =
       "\n\nYou are on Nexus, Black Raven IT's internal communications platform." +
       " Everyone on Nexus is a Black Raven IT employee or subcontractor." +
@@ -605,7 +689,7 @@ export async function runLlmPipeline({
       "\n- Lines beginning with '[actions you actually performed' in the history are your own private" +
       " record of what you really did on earlier turns. Trust them over your memory of the prose. If" +
       " there is no such line for an action, assume you did NOT do it and do not claim you did.";
-    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + threadContextBlock + channelContextBlock + hitlContextBlock;
+    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + memoryRecallBlock + threadContextBlock + channelContextBlock + hitlContextBlock;
 
     const channelHistoryTool = {
       name: "read_channel_history",
@@ -935,6 +1019,7 @@ export async function runLlmPipeline({
     try {
       await persistTurnPair(env, config.botName, {
         sessionId: historyKey,
+        entityId: memEntityId,
         userText: labeledUserText,
         assistantText: responseText,
         channel: channel_slug,
