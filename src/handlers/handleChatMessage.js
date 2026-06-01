@@ -1496,18 +1496,32 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     // GIF vision. The watercooler pipeline is otherwise text-only, so a Giphy/
     // Tenor GIF posted in the channel reaches the model only as a
     // "[GIF image: <url>]" annotation -- the bot reads a URL but never SEES the
-    // image, so it bluffs (e.g. "Donald Duck" for a Gordon Ramsay GIF). Pull the
-    // GIF links from recent history + the trigger, fetch them as image blocks,
-    // and attach to the final user turn so the bot actually sees what was posted.
-    // Both ambient and @mention triggers land here (see the inWatercooler route),
-    // so this covers casual banter AND "@bot what is this".
-    const wcGifUrls = extractGifUrls(
-      [...(recent || []).map((m) => m.body || ""), triggerBody || ""].join("\n")
-    );
+    // image, so it bluffs (e.g. "Donald Duck" for a Gordon Ramsay GIF).
+    //
+    // Attach ONLY the most-recent GIF, so the bot reacts to the one the
+    // conversation is actually about -- not an older GIF scrolled up in the
+    // channel (which made bots answer about stale GIFs, or confabulate from
+    // ambient channel chatter when asked "what is in this GIF?").
+    //  - If the trigger message itself carries a GIF, that's the subject.
+    //  - Otherwise walk back to the newest channel message bearing a GIF.
+    // `recent` is oldest->newest, so we scan from the end.
+    const triggerGifUrls = extractGifUrls(triggerBody || "");
+    let focusGifUrls = [];
+    if (triggerGifUrls.length > 0) {
+      focusGifUrls = [triggerGifUrls[triggerGifUrls.length - 1]];
+    } else {
+      for (let i = (recent || []).length - 1; i >= 0; i--) {
+        const found = extractGifUrls(recent[i].body || "");
+        if (found.length > 0) {
+          focusGifUrls = [found[found.length - 1]];
+          break;
+        }
+      }
+    }
     let wcGifBlocks = [];
-    if (wcGifUrls.length > 0) {
+    if (focusGifUrls.length > 0) {
       try {
-        const { blocks } = await fetchGifBlocks(env, wcGifUrls);
+        const { blocks } = await fetchGifBlocks(env, focusGifUrls);
         wcGifBlocks = blocks;
       } catch (err) {
         console.warn(`[watercooler] ${config.botName} GIF fetch failed:`, err?.message);
@@ -1516,7 +1530,11 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     if (wcGifBlocks.length > 0) {
       const lastMsg = messages[messages.length - 1];
       const lastText = typeof lastMsg.content === "string" ? lastMsg.content : "";
-      lastMsg.content = [...wcGifBlocks, { type: "text", text: lastText }];
+      const focusNote =
+        `${lastText}\n\n[The most recent GIF in the channel is attached above. If asked what it ` +
+        `is or to react to it, answer ONLY from what you actually SEE in that image -- do not guess ` +
+        `from earlier channel chatter or what you remember people talking about.]`;
+      lastMsg.content = [...wcGifBlocks, { type: "text", text: focusNote }];
     }
 
     const wcCallOpts = { model: "claude-sonnet-4-6", maxTokens: 250 };
