@@ -41,7 +41,7 @@ import { captureQa } from "../lib/qaCapture.js";
 import { postApprovalCard } from "../lib/hitl.js";
 import { withProvenance } from "../lib/provenanceContext.js";
 import { bangReport } from "../lib/embedCard.js";
-import { buildAttachmentContentBlocks } from "../lib/attachments.js";
+import { buildAttachmentContentBlocks, buildBlock } from "../lib/attachments.js";
 import { shouldChimeIn } from "../lib/watercooler.js";
 import { phoenixToday } from "../lib/format.js";
 import { buildActionBreadcrumb, looksLikeUnbackedClaim } from "../lib/actionTrace.js";
@@ -103,6 +103,49 @@ function annotateGifBody(body) {
     return `[GIF image: ${trimmed}]`;
   }
   return body;
+}
+
+// Picker GIFs (Giphy/Tenor) arrive as a CDN link in the message body, not as a
+// file upload, so they never reach buildAttachmentContentBlocks. Pull those
+// links out of the turn text and fetch them as image blocks so the bot SEES the
+// GIF instead of only reading its URL. Matches direct media URLs anywhere in
+// the body (these CDNs serve the raw image/gif bytes).
+const GIF_URL_GLOBAL_RE =
+  /https:\/\/(?:media\d*|i)\.giphy\.com\/[^\s)]+|https:\/\/media\.tenor\.com\/[^\s)]+/gi;
+const MAX_GIF_BYTES = 5 * 1024 * 1024;
+const MAX_GIFS_PER_TURN = 3;
+
+/**
+ * Fetch any Giphy/Tenor GIF URLs in the message body and convert them into
+ * Anthropic image content blocks. Best-effort: a failed or oversized fetch is
+ * skipped silently so it never collapses the reply.
+ *
+ * @param {object} env - worker env (IMAGES binding read for any transcode)
+ * @param {string} text - the raw user message body
+ * @returns {Promise<{ blocks: Array<object>, urls: string[] }>}
+ */
+async function buildGifUrlBlocks(env, text) {
+  if (!text) return { blocks: [], urls: [] };
+  const urls = [...new Set(text.match(GIF_URL_GLOBAL_RE) || [])].slice(0, MAX_GIFS_PER_TURN);
+  const blocks = [];
+  const used = [];
+  for (const url of urls) {
+    try {
+      const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
+      if (!resp.ok) continue;
+      const buf = await resp.arrayBuffer();
+      if (buf.byteLength > MAX_GIF_BYTES) continue;
+      const mime = (resp.headers.get("content-type") || "image/gif").toLowerCase().split(";")[0].trim();
+      const built = await buildBlock(env, mime, buf, "shared.gif");
+      if (built) {
+        blocks.push(built.block);
+        used.push(url);
+      }
+    } catch (err) {
+      console.warn("[handleChatMessage] GIF URL fetch failed:", err?.message);
+    }
+  }
+  return { blocks, urls: used };
 }
 
 /**
@@ -605,22 +648,32 @@ export async function runLlmPipeline({
     // rejects an attachment (oversized image, animated GIF, unsupported subtype),
     // so one bad file never collapses the whole reply into a generic error.
     let mediaRetryText = null;
+    // Gather media from two sources: (a) uploaded file attachments and (b)
+    // inline Giphy/Tenor GIF links in the body (which are not file uploads).
+    // Both become image/document/text blocks so the bot can actually see them.
+    const mediaBlocks = [];
     if (Array.isArray(attachments) && attachments.length > 0) {
       const { blocks, warnings } = await buildAttachmentContentBlocks(env, attachments);
       attachmentWarnings = warnings;
-      if (blocks.length > 0) {
-        const blockTextSummary = attachments
-          .map((a) => `${a.filename || a.id} [id=${a.id}] (${a.mime_type || "unknown"})`)
-          .join(", ");
-        const turnText =
-          `${labeledUserText}\n\n` +
-          `[attached files: ${blockTextSummary}]` +
-          (warnings.length ? `\n[attachment warnings: ${warnings.join(" ")}]` : "");
-        userContent = [...blocks, { type: "text", text: turnText }];
-        mediaRetryText = turnText;
-      } else if (warnings.length > 0) {
-        userContent = `${labeledUserText}\n\n[attachment warnings: ${warnings.join(" ")}]`;
-      }
+      mediaBlocks.push(...blocks);
+    }
+    const { blocks: gifBlocks } = await buildGifUrlBlocks(env, userText);
+    mediaBlocks.push(...gifBlocks);
+
+    if (mediaBlocks.length > 0) {
+      const blockTextSummary =
+        Array.isArray(attachments) && attachments.length
+          ? attachments.map((a) => `${a.filename || a.id} [id=${a.id}] (${a.mime_type || "unknown"})`).join(", ")
+          : "";
+      const turnText =
+        `${labeledUserText}` +
+        (blockTextSummary ? `\n\n[attached files: ${blockTextSummary}]` : "") +
+        (gifBlocks.length ? `\n\n[${gifBlocks.length} inline GIF image(s) shown above]` : "") +
+        (attachmentWarnings.length ? `\n[attachment warnings: ${attachmentWarnings.join(" ")}]` : "");
+      userContent = [...mediaBlocks, { type: "text", text: turnText }];
+      mediaRetryText = turnText;
+    } else if (attachmentWarnings.length > 0) {
+      userContent = `${labeledUserText}\n\n[attachment warnings: ${attachmentWarnings.join(" ")}]`;
     }
 
     history.push({ role: "user", content: userContent });
@@ -745,8 +798,9 @@ export async function runLlmPipeline({
         "(an attachment from the RECENT CHANNEL MESSAGES context block, or from the " +
         "read_channel_history tool). Use this when the user references a file from an " +
         "earlier turn that you need to read. PDFs return extracted markdown text. " +
-        "Images return a short description. Returns 'error' on unsupported types or " +
-        "when credentials are missing.",
+        "Images (including iPhone HEIC, TIFF, BMP, AVIF) return a detailed description. " +
+        "Word (.docx) and Excel (.xlsx) return their extracted text/cell values. " +
+        "Returns 'error' on unsupported types or when credentials are missing.",
       input_schema: {
         type: "object",
         properties: {
@@ -793,34 +847,36 @@ export async function runLlmPipeline({
       if (buf.byteLength > 10 * 1024 * 1024) {
         return { error: `Attachment ${id} is ${buf.byteLength} bytes; over 10 MB cap.` };
       }
-      const bytes = new Uint8Array(buf);
-      const CHUNK = 0x8000;
-      let binary = "";
-      for (let i = 0; i < bytes.length; i += CHUNK) {
-        binary += String.fromCharCode.apply(null, bytes.subarray(i, Math.min(i + CHUNK, bytes.length)));
-      }
-      const b64 = btoa(binary);
 
-      const isPdf = mime === "application/pdf";
-      const isImage = ["image/png", "image/jpeg", "image/jpg", "image/gif", "image/webp"].includes(mime);
-      if (!isPdf && !isImage) {
+      // Route the bytes through the shared block builder: PDFs/images become
+      // media blocks for an extraction sub-call; Word/Excel/SVG/text are decoded
+      // to text directly (no model round-trip needed); exotic images (HEIC etc.)
+      // are transcoded to JPEG via the IMAGES binding inside buildBlock.
+      let built;
+      try {
+        built = await buildBlock(env, mime, buf, input?.filename);
+      } catch (err) {
+        return { error: `Could not read attachment ${id}: ${err?.message || String(err)}` };
+      }
+      if (!built) {
         return { error: `Unsupported mime ${mime || "?"} for in-conversation load.` };
       }
 
-      const purpose = input?.purpose ? String(input.purpose).slice(0, 200) : "general reference";
-      const extractionPrompt = isPdf
-        ? `Extract the full content of this PDF as well-structured markdown. Preserve headings, lists, tables, and code blocks. Include EVERY section verbatim where reasonable; do not summarize. Intended use: ${purpose}.`
-        : `Describe this image in detail. Include all visible text verbatim (OCR), any diagrams, UI elements, or data. Intended use: ${purpose}.`;
+      // Text-bearing blocks (office docs, svg, text/*) already hold the content.
+      if (built.block.type === "text") {
+        return { ok: true, mime, bytes: buf.byteLength, content: built.block.text };
+      }
 
-      const block = isPdf
-        ? { type: "document", source: { type: "base64", media_type: "application/pdf", data: b64 } }
-        : { type: "image", source: { type: "base64", media_type: mime, data: b64 } };
+      const purpose = input?.purpose ? String(input.purpose).slice(0, 200) : "general reference";
+      const extractionPrompt = built.block.type === "document"
+        ? `Extract the full content of this document as well-structured markdown. Preserve headings, lists, tables, and code blocks. Include EVERY section verbatim where reasonable; do not summarize. Intended use: ${purpose}.`
+        : `Describe this image in detail. Include all visible text verbatim (OCR), any diagrams, UI elements, or data. Intended use: ${purpose}.`;
 
       try {
         const extracted = await callAnthropic(
           env,
           "You are an extraction assistant. Return ONLY the requested content, no preamble.",
-          [{ role: "user", content: [block, { type: "text", text: extractionPrompt }] }],
+          [{ role: "user", content: [built.block, { type: "text", text: extractionPrompt }] }],
           { maxTokens: 8000 },
         );
         return { ok: true, mime, bytes: buf.byteLength, content: extracted };

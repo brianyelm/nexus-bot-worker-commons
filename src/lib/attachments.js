@@ -14,8 +14,14 @@
 //
 // This module turns that list into Anthropic Messages API content blocks:
 //
-//   PDFs   -> { type: "document", source: { type: "base64", media_type: "application/pdf", data } }
-//   Images -> { type: "image",    source: { type: "base64", media_type: <mime>, data } }
+//   PDFs            -> { type: "document", source: { type: "base64", media_type: "application/pdf", data } }
+//   Native images   -> { type: "image",    source: { type: "base64", media_type: <mime>, data } }
+//     (png, jpeg, gif, webp -- the only formats Anthropic vision accepts)
+//   Exotic images   -> transcoded to JPEG via env.IMAGES, then an image block
+//     (heic, heif, tiff, bmp, avif -- e.g. iPhone photos)
+//   Word / Excel    -> { type: "text", text: <extracted document text> }
+//     (.docx/.xlsx have no native reader; we crack the OOXML zip ourselves)
+//   SVG + text/*    -> { type: "text", text: <source / file text> }
 //
 // Fetch auth: GET <NEXUS_BASE_URL><url> with X-Internal-Token = INTERNAL_ADMIN_TOKEN.
 // The Nexus worker exposes /api/internal/attachments/:id behind that same token
@@ -31,11 +37,15 @@
 // and a warning text returned to the caller; they never abort the LLM call.
 // =============================================================================
 
+import { extractOfficeText, isOfficeMime } from "./officeText.js";
+import { isExoticImageMime, transcodeToJpeg } from "./imageTranscode.js";
+
 const PER_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const TOTAL_SOFT_BYTES = 3 * 1024 * 1024;
 const TOTAL_HARD_BYTES = 32 * 1024 * 1024;
 const FETCH_TIMEOUT_MS = 15000;
 
+// Formats Anthropic vision accepts as-is.
 const IMAGE_MIME = new Set([
   "image/png",
   "image/jpeg",
@@ -45,6 +55,16 @@ const IMAGE_MIME = new Set([
 ]);
 
 const PDF_MIME = "application/pdf";
+const SVG_MIME = "image/svg+xml";
+
+// Text-ish mimes we can decode straight to a text block. Anything matching
+// text/* is also treated as text (covers text/markdown, text/csv, etc.).
+const TEXT_MIME = new Set([
+  "application/json",
+  "application/xml",
+  "application/x-yaml",
+  "application/yaml",
+]);
 
 /**
  * Base64-encode an ArrayBuffer using btoa via Latin1 chunked conversion.
@@ -68,9 +88,28 @@ function bufferToBase64(buf) {
 }
 
 /**
+ * Whether this module knows how to turn the given mime into a content block.
+ * Mirrors the routing in fetchOne so callers can pre-flight without fetching.
+ * @param {string} mime
+ * @returns {boolean}
+ */
+export function isSupportedAttachmentMime(mime) {
+  const m = String(mime || "").toLowerCase();
+  return (
+    m === PDF_MIME ||
+    m === SVG_MIME ||
+    IMAGE_MIME.has(m) ||
+    isExoticImageMime(m) ||
+    isOfficeMime(m) ||
+    TEXT_MIME.has(m) ||
+    m.startsWith("text/")
+  );
+}
+
+/**
  * Fetch one attachment from Nexus and convert to an Anthropic content block.
  * Returns null if the file is over the per-file cap, the mime is unsupported,
- * or the fetch fails.
+ * or the fetch/conversion fails.
  *
  * @param {object} env
  * @param {string} baseUrl
@@ -82,9 +121,7 @@ async function fetchOne(env, baseUrl, token, att) {
   if (!att || !att.url || !att.mime_type) return null;
 
   const mime = String(att.mime_type).toLowerCase();
-  const isPdf = mime === PDF_MIME;
-  const isImage = IMAGE_MIME.has(mime);
-  if (!isPdf && !isImage) {
+  if (!isSupportedAttachmentMime(mime)) {
     console.log(`[attachments] skipping unsupported mime ${mime} (${att.filename})`);
     return null;
   }
@@ -128,18 +165,83 @@ async function fetchOne(env, baseUrl, token, att) {
     return null;
   }
 
-  const data = bufferToBase64(buf);
-  const block = isPdf
-    ? {
-        type: "document",
-        source: { type: "base64", media_type: PDF_MIME, data },
-      }
-    : {
-        type: "image",
-        source: { type: "base64", media_type: mime, data },
-      };
+  return buildBlock(env, mime, buf, att.filename);
+}
 
-  return { block, bytes: buf.byteLength };
+/**
+ * Route a fetched buffer to the right Anthropic content block based on mime.
+ * Shared by the inline-attachment path and the nexus_load_attachment tool.
+ *
+ * @param {object} env - worker env (reads IMAGES binding for exotic transcode)
+ * @param {string} mime - lower-cased mime type
+ * @param {ArrayBuffer} buf - the raw file bytes
+ * @param {string} [filename]
+ * @returns {Promise<{ block: object, bytes: number } | null>}
+ */
+export async function buildBlock(env, mime, buf, filename) {
+  // --- PDF: native document block ---
+  if (mime === PDF_MIME) {
+    return {
+      block: { type: "document", source: { type: "base64", media_type: PDF_MIME, data: bufferToBase64(buf) } },
+      bytes: buf.byteLength,
+    };
+  }
+
+  // --- Native images: straight through ---
+  if (IMAGE_MIME.has(mime)) {
+    return {
+      block: { type: "image", source: { type: "base64", media_type: mime, data: bufferToBase64(buf) } },
+      bytes: buf.byteLength,
+    };
+  }
+
+  // --- Exotic raster (HEIC/TIFF/BMP/AVIF): transcode to JPEG via Images ---
+  if (isExoticImageMime(mime)) {
+    const jpeg = await transcodeToJpeg(env.IMAGES, buf);
+    if (!jpeg) {
+      console.warn(`[attachments] could not transcode ${mime} (${filename}); IMAGES binding missing or failed`);
+      return null;
+    }
+    return {
+      block: { type: "image", source: { type: "base64", media_type: "image/jpeg", data: bufferToBase64(jpeg) } },
+      bytes: jpeg.byteLength,
+    };
+  }
+
+  // --- Word / Excel: extract text, hand over as a text block ---
+  if (isOfficeMime(mime)) {
+    let text;
+    try {
+      text = await extractOfficeText(buf, mime);
+    } catch (err) {
+      console.warn(`[attachments] office extract failed for ${filename}:`, err?.message || String(err));
+      return null;
+    }
+    if (!text) return null;
+    const label = filename ? `Contents of ${filename}` : "Attached document contents";
+    return {
+      block: { type: "text", text: `${label}:\n\n${text}` },
+      bytes: text.length,
+    };
+  }
+
+  // --- SVG + any text/* (markdown, csv, json, xml, yaml, plain): decode text ---
+  if (mime === SVG_MIME || TEXT_MIME.has(mime) || mime.startsWith("text/")) {
+    let text;
+    try {
+      text = new TextDecoder("utf-8").decode(buf);
+    } catch (err) {
+      console.warn(`[attachments] text decode failed for ${filename}:`, err?.message || String(err));
+      return null;
+    }
+    const label = filename ? `Contents of ${filename} (${mime})` : `Attached ${mime} contents`;
+    return {
+      block: { type: "text", text: `${label}:\n\n${text}` },
+      bytes: text.length,
+    };
+  }
+
+  return null;
 }
 
 /**
@@ -152,7 +254,7 @@ async function fetchOne(env, baseUrl, token, att) {
  * BEFORE the text body. They will be the first thing Claude sees, which
  * matters for documents (the OUTPUT CONTRACT pattern relies on text last).
  *
- * @param {object} env -- worker env (reads INTERNAL_ADMIN_TOKEN, NEXUS_BASE_URL)
+ * @param {object} env -- worker env (reads INTERNAL_ADMIN_TOKEN, NEXUS_BASE_URL, IMAGES)
  * @param {Array<object>} attachments -- payload.attachments from Nexus
  * @param {object} [options]
  * @param {string} [options.tokenEnvVar=NEXUS_INTERNAL_TOKEN]
