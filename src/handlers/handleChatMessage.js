@@ -42,6 +42,7 @@ import { postApprovalCard } from "../lib/hitl.js";
 import { withProvenance } from "../lib/provenanceContext.js";
 import { bangReport } from "../lib/embedCard.js";
 import { buildAttachmentContentBlocks, buildBlock } from "../lib/attachments.js";
+import { transcodeToJpeg } from "../lib/imageTranscode.js";
 import { shouldChimeIn } from "../lib/watercooler.js";
 import { phoenixToday } from "../lib/format.js";
 import { buildActionBreadcrumb, looksLikeUnbackedClaim } from "../lib/actionTrace.js";
@@ -105,44 +106,91 @@ function annotateGifBody(body) {
   return body;
 }
 
-// Picker GIFs (Giphy/Tenor) arrive as a CDN link in the message body, not as a
-// file upload, so they never reach buildAttachmentContentBlocks. Pull those
-// links out of the turn text and fetch them as image blocks so the bot SEES the
-// GIF instead of only reading its URL. Matches direct media URLs anywhere in
-// the body (these CDNs serve the raw image/gif bytes).
-const GIF_URL_GLOBAL_RE =
-  /https:\/\/(?:media\d*|i)\.giphy\.com\/[^\s)]+|https:\/\/media\.tenor\.com\/[^\s)]+/gi;
-const MAX_GIF_BYTES = 5 * 1024 * 1024;
+// Picker GIFs (Giphy/Tenor) arrive as a link in the message body, not as a file
+// upload, so they never reach buildAttachmentContentBlocks. We pull those links
+// -- from the current turn AND from recent channel history (the common case:
+// someone posts a GIF, then asks the bot about it a message later) -- and turn
+// them into image blocks so the bot SEES the GIF instead of only reading a URL.
+//
+// Matches any giphy.com / tenor.com URL: direct media CDN links AND share/page
+// links (e.g. tenor.com/view/..., giphy.com/gifs/...). Page links are resolved
+// to the underlying image via the page's og:image meta tag.
+const GIF_URL_GLOBAL_RE = /https?:\/\/[^\s"'<>]*\b(?:giphy\.com|tenor\.com)\/[^\s"'<>)]+/gi;
+const MAX_GIF_BYTES = 8 * 1024 * 1024;
 const MAX_GIFS_PER_TURN = 3;
 
 /**
- * Fetch any Giphy/Tenor GIF URLs in the message body and convert them into
- * Anthropic image content blocks. Best-effort: a failed or oversized fetch is
- * skipped silently so it never collapses the reply.
+ * Extract unique Giphy/Tenor URLs from a block of text, in first-seen order.
+ * @param {string} text
+ * @returns {string[]}
+ */
+function extractGifUrls(text) {
+  if (!text) return [];
+  return [...new Set(text.match(GIF_URL_GLOBAL_RE) || [])];
+}
+
+/**
+ * Resolve a Giphy/Tenor URL to raw image bytes. Direct media URLs return their
+ * bytes; share/page URLs are fetched as HTML and resolved via og:image.
  *
- * @param {object} env - worker env (IMAGES binding read for any transcode)
- * @param {string} text - the raw user message body
+ * @param {string} url
+ * @returns {Promise<{ buf: ArrayBuffer, mime: string } | null>}
+ */
+async function resolveGifImageBytes(url) {
+  const headers = { "User-Agent": "Mozilla/5.0 (compatible; NexusBot/1.0)" };
+  const resp = await fetch(url, { signal: AbortSignal.timeout(10000), headers });
+  if (!resp.ok) return null;
+  const ct = (resp.headers.get("content-type") || "").toLowerCase().split(";")[0].trim();
+
+  if (ct.startsWith("image/")) {
+    return { buf: await resp.arrayBuffer(), mime: ct };
+  }
+  if (ct.includes("html")) {
+    const html = await resp.text();
+    const og =
+      html.match(/<meta[^>]+property=["']og:image(?::secure_url)?["'][^>]*\scontent=["']([^"']+)["']/i) ||
+      html.match(/<meta[^>]+\scontent=["']([^"']+)["'][^>]+property=["']og:image/i);
+    const imgUrl = og && og[1] ? og[1].replace(/&amp;/g, "&") : null;
+    if (imgUrl) {
+      const r2 = await fetch(imgUrl, { signal: AbortSignal.timeout(10000), headers });
+      if (r2.ok) {
+        const ct2 = (r2.headers.get("content-type") || "image/gif").toLowerCase().split(";")[0].trim();
+        if (ct2.startsWith("image/")) return { buf: await r2.arrayBuffer(), mime: ct2 };
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Fetch a list of Giphy/Tenor URLs and convert each to an Anthropic image
+ * block. GIFs are transcoded to a single JPEG frame via the IMAGES binding when
+ * available -- this guarantees the (often animated) image is accepted by the
+ * vision API and is enough for the bot to see the content. Falls back to the
+ * raw bytes if transcoding is unavailable. Best-effort: failures are skipped.
+ *
+ * @param {object} env - worker env (IMAGES binding read for transcode)
+ * @param {string[]} urls - candidate Giphy/Tenor URLs (priority order)
  * @returns {Promise<{ blocks: Array<object>, urls: string[] }>}
  */
-async function buildGifUrlBlocks(env, text) {
-  if (!text) return { blocks: [], urls: [] };
-  const urls = [...new Set(text.match(GIF_URL_GLOBAL_RE) || [])].slice(0, MAX_GIFS_PER_TURN);
+async function fetchGifBlocks(env, urls) {
   const blocks = [];
   const used = [];
-  for (const url of urls) {
+  for (const url of urls.slice(0, MAX_GIFS_PER_TURN)) {
     try {
-      const resp = await fetch(url, { signal: AbortSignal.timeout(10000) });
-      if (!resp.ok) continue;
-      const buf = await resp.arrayBuffer();
-      if (buf.byteLength > MAX_GIF_BYTES) continue;
-      const mime = (resp.headers.get("content-type") || "image/gif").toLowerCase().split(";")[0].trim();
-      const built = await buildBlock(env, mime, buf, "shared.gif");
+      const resolved = await resolveGifImageBytes(url);
+      if (!resolved || resolved.buf.byteLength > MAX_GIF_BYTES) continue;
+
+      let built = null;
+      const jpeg = await transcodeToJpeg(env.IMAGES, resolved.buf);
+      if (jpeg) built = await buildBlock(env, "image/jpeg", jpeg, "shared-image");
+      if (!built) built = await buildBlock(env, resolved.mime, resolved.buf, "shared-image");
       if (built) {
         blocks.push(built.block);
         used.push(url);
       }
     } catch (err) {
-      console.warn("[handleChatMessage] GIF URL fetch failed:", err?.message);
+      console.warn("[handleChatMessage] GIF fetch failed:", err?.message);
     }
   }
   return { blocks, urls: used };
@@ -491,6 +539,10 @@ export async function runLlmPipeline({
     // migration regression 2026-05-23.
     let channelContextBlock = "";
     let threadContextBlock = "";
+    // GIF/Tenor links spotted in recent channel history, most-recent first.
+    // Fed into the multimodal hand-off so the bot can SEE a GIF someone posted
+    // a message or two ago when asked about it (not just the current turn).
+    let historyGifUrls = [];
     const ccEnabled = config.channelContext?.enabled !== false;
     const ccLimit = config.channelContext?.limit ?? 15;
     if (reply_to) {
@@ -535,6 +587,13 @@ export async function runLlmPipeline({
           limit: ccLimit,
         });
         if (recentMsgs && recentMsgs.length > 0) {
+          // Harvest GIF links from history, most-recent first, so the bot can
+          // load and see a GIF referenced from an earlier message this turn.
+          for (let i = recentMsgs.length - 1; i >= 0; i--) {
+            for (const u of extractGifUrls(recentMsgs[i].body || "")) {
+              if (!historyGifUrls.includes(u)) historyGifUrls.push(u);
+            }
+          }
           const lines = recentMsgs
             .filter((m) => m.user_id !== "system")
             .map((m) => {
@@ -657,7 +716,11 @@ export async function runLlmPipeline({
       attachmentWarnings = warnings;
       mediaBlocks.push(...blocks);
     }
-    const { blocks: gifBlocks } = await buildGifUrlBlocks(env, userText);
+    // GIF links to load: current-turn links first (highest priority), then any
+    // spotted in recent channel history (someone posted a GIF, then asked the
+    // bot about it). Deduped; fetchGifBlocks caps the total fetched per turn.
+    const gifCandidateUrls = [...new Set([...extractGifUrls(userText), ...historyGifUrls])];
+    const { blocks: gifBlocks } = await fetchGifBlocks(env, gifCandidateUrls);
     mediaBlocks.push(...gifBlocks);
 
     if (mediaBlocks.length > 0) {
@@ -668,7 +731,7 @@ export async function runLlmPipeline({
       const turnText =
         `${labeledUserText}` +
         (blockTextSummary ? `\n\n[attached files: ${blockTextSummary}]` : "") +
-        (gifBlocks.length ? `\n\n[${gifBlocks.length} inline GIF image(s) shown above]` : "") +
+        (gifBlocks.length ? `\n\n[${gifBlocks.length} GIF image(s) from this conversation shown above]` : "") +
         (attachmentWarnings.length ? `\n[attachment warnings: ${attachmentWarnings.join(" ")}]` : "");
       userContent = [...mediaBlocks, { type: "text", text: turnText }];
       mediaRetryText = turnText;
