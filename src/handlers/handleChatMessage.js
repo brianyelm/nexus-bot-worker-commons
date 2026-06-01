@@ -208,15 +208,33 @@ async function fetchGifBlocks(env, urls) {
  * @param {string} currentSessionId - historyKey of the live chat session
  * @returns {string}
  */
+function formatRecallAge(createdAt, now) {
+  if (typeof createdAt !== "number" || !createdAt) return "";
+  const ms = now - createdAt;
+  if (ms < 60 * 1000) return "just now";
+  const mins = Math.floor(ms / (60 * 1000));
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 14) return `${days}d ago`;
+  if (days < 60) return `${Math.floor(days / 7)}w ago`;
+  return `${Math.floor(days / 30)}mo ago`;
+}
+
 function buildMemoryRecallBlock(ctx, currentSessionId) {
   if (!ctx) return "";
   const lines = [];
+  const now = Date.now();
 
   const facts = Array.isArray(ctx.facts) ? ctx.facts : [];
   const factLines = facts
     .filter((f) => f && f.predicate && f.object)
     .slice(0, 15)
-    .map((f) => `- ${String(f.predicate).replace(/_/g, " ")}: ${f.object}`);
+    .map((f) => {
+      const age = formatRecallAge(f.created_at, now);
+      return `- ${String(f.predicate).replace(/_/g, " ")}: ${f.object}${age ? ` [${age}]` : ""}`;
+    });
   if (factLines.length) {
     lines.push("Known facts:");
     lines.push(...factLines);
@@ -233,7 +251,8 @@ function buildMemoryRecallBlock(ctx, currentSessionId) {
     for (const t of turns.slice(-12)) {
       const who = t.role === "assistant" ? "you" : "them";
       const where = t.channel ? ` (${t.channel})` : "";
-      lines.push(`- ${who}${where}: ${String(t.content).replace(/\s+/g, " ").slice(0, 200)}`);
+      const age = formatRecallAge(t.created_at, now);
+      lines.push(`- ${who}${where}${age ? ` [${age}]` : ""}: ${String(t.content).replace(/\s+/g, " ").slice(0, 200)}`);
     }
   }
 
@@ -244,14 +263,18 @@ function buildMemoryRecallBlock(ctx, currentSessionId) {
     lines.push("Recent conversation summaries:");
     for (const s of summaries.slice(0, 3)) {
       const where = s.channel ? `${s.channel}: ` : "";
-      lines.push(`- ${where}${String(s.summary).replace(/\s+/g, " ").slice(0, 300)}`);
+      const age = formatRecallAge(s.last_active, now);
+      lines.push(`-${age ? ` [${age}]` : ""} ${where}${String(s.summary).replace(/\s+/g, " ").slice(0, 300)}`);
     }
   }
 
   if (!lines.length) return "";
   return (
     "\n\nWHAT YOU REMEMBER ABOUT THIS PERSON (your shared memory across chat, voice calls, and phone calls -- " +
-    "use it naturally for continuity; do NOT recite it verbatim or say you looked it up):\n" +
+    "use it naturally for continuity; do NOT recite it verbatim or say you looked it up). " +
+    "Bracketed ages like [3d ago] mark how OLD each item is -- this is PAST context, not current events. " +
+    "Do NOT raise an old fact or past conversation as if it is happening now or announce it as news; " +
+    "only bring it up if the person references it first or it directly answers what they just asked:\n" +
     lines.join("\n")
   );
 }
@@ -1688,30 +1711,41 @@ export async function handleChatMessage(request, env, ctx, config) {
     // Unknown !command falls through to LLM
   }
 
-  // ---- 7a. Watercooler ambient chime-in (probabilistic, before standard gate) -
-  // When a human posts in the watercooler channel and this bot has watercooler
-  // config, bypass the standard mention-based ambient gate and use the
-  // probabilistic decision engine (10% chance, cooldowns, warmth check).
-  // Direct @mentions in watercooler arrive as trigger_type="mention" and
-  // skip this block entirely, falling through to the standard LLM pipeline.
-  if (
-    trigger_type === "ambient" &&
+  // ---- 7a. Watercooler routing (casual persona; bypass full memory/tool pipeline)
+  // The watercooler is an off-the-clock channel. BOTH probabilistic ambient
+  // chime-ins AND direct @mentions are handled by the lightweight persona
+  // pipeline here -- NOT the standard LLM pipeline. This keeps cross-surface
+  // work memory (durable facts + old chat/voice/phone turns) and the tool loop
+  // out of casual banter: a bot pinged in the watercooler chats like a coworker
+  // and defers real job tasks to a work channel. Routing mentions through the
+  // standard pipeline made bots dump stale work memory into casual threads
+  // (e.g. surfacing an old "Cloudflare situation" as if it were live).
+  // Explicit `!commands` are handled earlier (section 7) and still run with
+  // full capability, so deliberate work requests here are unaffected.
+  const inWatercooler =
     config.watercooler &&
-    channel_slug === (config.watercooler.channelSlug || "watercooler")
-  ) {
+    channel_slug === (config.watercooler.channelSlug || "watercooler");
+  if (inWatercooler && (trigger_type === "ambient" || trigger_type === "mention")) {
     const nexusOptions = { nexusKeyEnvVar: config.nexusKeyEnvVar };
-    const decision = await shouldChimeIn(
-      env, config.botName, channel_slug, msgBody || "", nexusOptions, user_id,
-    );
-    if (!decision.respond) {
-      return json({ success: true, skipped: true, reason: decision.reason });
+
+    // Direct @mention: always respond (skip the probabilistic chime-in gate).
+    // Ambient: run the warmth/cooldown/probability decision engine first.
+    let nameMention = true;
+    if (trigger_type === "ambient") {
+      const decision = await shouldChimeIn(
+        env, config.botName, channel_slug, msgBody || "", nexusOptions, user_id,
+      );
+      if (!decision.respond) {
+        return json({ success: true, skipped: true, reason: decision.reason });
+      }
+      nameMention = !!decision.nameMention;
     }
     ctx.waitUntil(
       withProvenance("mention-reply", () => runWatercoolerPipeline({
         env,
         channel_slug,
         config,
-        nameMention: !!decision.nameMention,
+        nameMention,
         triggerUserId: user_id,
         triggerDisplayName: display_name,
         triggerBody: msgBody,
