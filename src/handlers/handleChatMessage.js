@@ -1428,10 +1428,49 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
       };
     }
 
-    const response = await callAnthropic(env, fullSystemPrompt, messages, {
-      model: "claude-sonnet-4-6",
-      maxTokens: 250,
-    });
+    // GIF vision. The watercooler pipeline is otherwise text-only, so a Giphy/
+    // Tenor GIF posted in the channel reaches the model only as a
+    // "[GIF image: <url>]" annotation -- the bot reads a URL but never SEES the
+    // image, so it bluffs (e.g. "Donald Duck" for a Gordon Ramsay GIF). Pull the
+    // GIF links from recent history + the trigger, fetch them as image blocks,
+    // and attach to the final user turn so the bot actually sees what was posted.
+    // Both ambient and @mention triggers land here (see the inWatercooler route),
+    // so this covers casual banter AND "@bot what is this".
+    const wcGifUrls = extractGifUrls(
+      [...(recent || []).map((m) => m.body || ""), triggerBody || ""].join("\n")
+    );
+    let wcGifBlocks = [];
+    if (wcGifUrls.length > 0) {
+      try {
+        const { blocks } = await fetchGifBlocks(env, wcGifUrls);
+        wcGifBlocks = blocks;
+      } catch (err) {
+        console.warn(`[watercooler] ${config.botName} GIF fetch failed:`, err?.message);
+      }
+    }
+    if (wcGifBlocks.length > 0) {
+      const lastMsg = messages[messages.length - 1];
+      const lastText = typeof lastMsg.content === "string" ? lastMsg.content : "";
+      lastMsg.content = [...wcGifBlocks, { type: "text", text: lastText }];
+    }
+
+    const wcCallOpts = { model: "claude-sonnet-4-6", maxTokens: 250 };
+    let response;
+    try {
+      response = await callAnthropic(env, fullSystemPrompt, messages, wcCallOpts);
+    } catch (err) {
+      // An oversized or animated GIF can make Anthropic reject the multimodal
+      // call. Never let that swallow the reply: strip the media and retry once
+      // text-only so the bot still responds (it just won't see the image).
+      if (wcGifBlocks.length === 0) throw err;
+      console.warn(`[watercooler] ${config.botName} multimodal call failed, retrying text-only:`, err?.message);
+      const lastMsg = messages[messages.length - 1];
+      if (Array.isArray(lastMsg.content)) {
+        const textBlock = lastMsg.content.find((b) => b.type === "text");
+        lastMsg.content = textBlock ? textBlock.text : "";
+      }
+      response = await callAnthropic(env, fullSystemPrompt, messages, wcCallOpts);
+    }
 
     if (response && response.trim()) {
       const cleaned = response.trim().replace(/[—–]/g, "-");
