@@ -1293,20 +1293,22 @@ function looksLikeWatercoolerMetaLeak(text) {
 
 /**
  * Detect verbatim repetition: any 5+ consecutive-word phrase from the
- * candidate response that also appears in one of the bot's recent messages.
- * Catches model regurgitation when Sonnet locks onto a persona catchphrase
- * (e.g. "Ferris is my cat, named after Ferris Bueller") and emits it on
- * every reply regardless of what the user asked.
+ * candidate response that also appears in one of the comparison messages.
+ * Two callers: (1) the bot's OWN recent messages, to catch model
+ * regurgitation when Sonnet locks onto a persona catchphrase (e.g. "Ferris
+ * is my cat, named after Ferris Bueller") and emits it every reply; and
+ * (2) OTHER bots' recent messages, to stop two bots from posting near-
+ * identical lines in reply to the same watercooler statement.
  *
  * @param {string} response - the candidate response text
- * @param {string[]} previousBotBodies - this bot's recent message bodies
+ * @param {string[]} comparisonBodies - recent message bodies to compare against
  * @returns {string|null} the repeated phrase, or null if none found
  */
-function findRepeatedPhrase(response, previousBotBodies) {
+function findRepeatedPhrase(response, comparisonBodies) {
   const norm = (s) => (s || "").toLowerCase().replace(/[^\w\s]/g, " ").split(/\s+/).filter(Boolean);
   const respWords = norm(response);
   if (respWords.length < 5) return null;
-  for (const prev of previousBotBodies) {
+  for (const prev of comparisonBodies) {
     const prevWords = norm(prev);
     if (prevWords.length < 5) continue;
     const prevChunks = new Set();
@@ -1421,6 +1423,24 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
       const repeated = findRepeatedPhrase(cleaned, previousBotBodies);
       if (repeated) {
         console.warn(`[watercooler] ${config.botName} repeat suppressed (phrase: "${repeated}"): ${cleaned.slice(0, 80)}`);
+        return;
+      }
+      // Cross-bot duplicate guard. The ambient chime-in decision races: when a
+      // human posts, every watercooler bot evaluates shouldChimeIn at nearly
+      // the same instant, before any of them has actually posted, so the
+      // CROSS_BOT_GUARD cooldown in watercooler.js cannot see its siblings.
+      // The result is two bots replying to the SAME statement with near-
+      // identical lines (e.g. both "<X> is its own cardio, honestly"). By the
+      // time this pipeline re-fetched `recent`, the faster bot's reply is
+      // almost always already present, so suppress when our candidate shares a
+      // 5+ word phrase with any OTHER bot's recent message.
+      const otherBotBodies = (recent || [])
+        .filter((m) => typeof m.user_id === "string" && m.user_id.startsWith("bot_") && m.user_id !== botId)
+        .map((m) => m.body)
+        .filter(Boolean);
+      const echoed = findRepeatedPhrase(cleaned, otherBotBodies);
+      if (echoed) {
+        console.warn(`[watercooler] ${config.botName} cross-bot duplicate suppressed (phrase: "${echoed}"): ${cleaned.slice(0, 80)}`);
         return;
       }
       // Only thread when the human's message was already in a thread.
