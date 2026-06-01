@@ -44,6 +44,7 @@ const SAFE_INPUT_KEYS = [
 const READONLY_EXACT = new Set([
   "read_channel_history",
   "nexus_load_attachment",
+  "nexus_view_gif",
 ]);
 const READONLY_PREFIXES = [
   "get_", "list_", "read_", "search_", "find_", "lookup_",

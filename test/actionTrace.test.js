@@ -11,6 +11,7 @@ import {
 test("isReadonlyToolName: exact read-only tools", () => {
   assert.equal(isReadonlyToolName("read_channel_history"), true);
   assert.equal(isReadonlyToolName("nexus_load_attachment"), true);
+  assert.equal(isReadonlyToolName("nexus_view_gif"), true);
 });
 
 test("isReadonlyToolName: read-only prefixes", () => {

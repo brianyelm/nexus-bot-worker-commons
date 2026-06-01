@@ -739,10 +739,15 @@ export async function runLlmPipeline({
       attachmentWarnings = warnings;
       mediaBlocks.push(...blocks);
     }
-    // GIF links to load: current-turn links first (highest priority), then any
-    // spotted in recent channel history (someone posted a GIF, then asked the
-    // bot about it). Deduped; fetchGifBlocks caps the total fetched per turn.
-    const gifCandidateUrls = [...new Set([...extractGifUrls(userText), ...historyGifUrls])];
+    // GIF focus rule: only auto-attach the GIF the conversation is actually
+    // about, so the bot stops reacting to stale GIFs scrolled up in history.
+    //  - If the user posted GIF(s) WITH this message, those are the subject.
+    //  - Otherwise attach ONLY the single most-recent GIF in the channel.
+    // To discuss an older GIF, the bot loads it on demand via nexus_view_gif.
+    const currentTurnGifUrls = extractGifUrls(userText);
+    const gifCandidateUrls =
+      currentTurnGifUrls.length > 0 ? currentTurnGifUrls : historyGifUrls.slice(0, 1);
+    const usedHistoryGif = currentTurnGifUrls.length === 0 && gifCandidateUrls.length > 0;
     const { blocks: gifBlocks } = await fetchGifBlocks(env, gifCandidateUrls);
     mediaBlocks.push(...gifBlocks);
 
@@ -751,10 +756,15 @@ export async function runLlmPipeline({
         Array.isArray(attachments) && attachments.length
           ? attachments.map((a) => `${a.filename || a.id} [id=${a.id}] (${a.mime_type || "unknown"})`).join(", ")
           : "";
+      const gifNote = gifBlocks.length
+        ? usedHistoryGif
+          ? `\n\n[the most recent GIF in this channel is shown above -- focus on it; only if the user clearly asks about a different or older GIF, load that one with nexus_view_gif]`
+          : `\n\n[${gifBlocks.length} GIF image(s) the user just posted are shown above]`
+        : "";
       const turnText =
         `${labeledUserText}` +
         (blockTextSummary ? `\n\n[attached files: ${blockTextSummary}]` : "") +
-        (gifBlocks.length ? `\n\n[${gifBlocks.length} GIF image(s) from this conversation shown above]` : "") +
+        gifNote +
         (attachmentWarnings.length ? `\n[attachment warnings: ${attachmentWarnings.join(" ")}]` : "");
       userContent = [...mediaBlocks, { type: "text", text: turnText }];
       mediaRetryText = turnText;
@@ -1025,11 +1035,51 @@ export async function runLlmPipeline({
       }
     };
 
-    const mergedTools = [...(config.tools.definitions || []), channelHistoryTool, loadAttachmentTool, rememberTool];
+    // On-demand GIF viewer. By default only the most-recent GIF is shown to the
+    // bot; when the user asks about a different or older GIF, the bot passes
+    // that GIF's Giphy/Tenor URL (from the channel history it can read) here to
+    // actually SEE it. Returns an image block as a multimodal tool result.
+    const viewGifTool = {
+      name: "nexus_view_gif",
+      description:
+        "Look at a specific GIF by its Giphy/Tenor URL. Only the most recent GIF in a channel is " +
+        "shown to you automatically; use this when the user asks about a DIFFERENT or OLDER GIF that " +
+        "appears earlier in the conversation. Pass the giphy.com/tenor.com URL exactly as it appears " +
+        "in the channel history. Returns the image so you can see it.",
+      input_schema: {
+        type: "object",
+        properties: {
+          url: {
+            type: "string",
+            description: "The giphy.com or tenor.com URL of the GIF to view, copied from the channel history.",
+          },
+        },
+        required: ["url"],
+      },
+    };
+    const viewGifHandler = async (input) => {
+      const url = input?.url;
+      if (!url || !/\b(?:giphy\.com|tenor\.com)\//i.test(String(url))) {
+        return { error: "Pass a giphy.com or tenor.com GIF URL from the conversation." };
+      }
+      const { blocks } = await fetchGifBlocks(env, [String(url)]);
+      if (!blocks.length) {
+        return { error: `Could not load the GIF at ${url} (fetch failed or unsupported).` };
+      }
+      return {
+        toolResultContent: [
+          blocks[0],
+          { type: "text", text: "GIF loaded above. Describe or react to THIS GIF." },
+        ],
+      };
+    };
+
+    const mergedTools = [...(config.tools.definitions || []), channelHistoryTool, loadAttachmentTool, viewGifTool, rememberTool];
     const mergedHandlers = {
       ...(config.tools.handlers || {}),
       read_channel_history: channelHistoryHandler,
       nexus_load_attachment: loadAttachmentHandler,
+      nexus_view_gif: viewGifHandler,
       remember: rememberHandler,
     };
 

@@ -268,7 +268,14 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
       try {
         if (!handler) throw new Error(`Unknown tool: ${block.name}`);
         const raw = await handler(block.input, env, ctx);
-        resultContent = typeof raw === "string" ? raw : JSON.stringify(raw).slice(0, 20000);
+        // A handler may return { toolResultContent: [...blocks] } to hand the
+        // model a multimodal tool result (e.g. an image block so it can SEE a
+        // GIF the user referenced). Otherwise the result is text/JSON.
+        if (raw && typeof raw === "object" && Array.isArray(raw.toolResultContent)) {
+          resultContent = raw.toolResultContent;
+        } else {
+          resultContent = typeof raw === "string" ? raw : JSON.stringify(raw).slice(0, 20000);
+        }
       } catch (err) {
         console.error(`[anthropic] tool_error tool=${block.name}:`, err.message);
         resultContent = `Error: ${err.message}`;
