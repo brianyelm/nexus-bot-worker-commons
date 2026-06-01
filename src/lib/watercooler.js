@@ -191,16 +191,16 @@ export async function shouldChimeIn(env, botName, channelSlug, body, nexusOption
     }
   }
 
-  // Tier 0: active conversation continuation
-  // Cross-bot guard: if another bot just spoke and the user didn't name us,
-  // yield. Prevents two bots dogpiling the same follow-up message.
+  // Tier 0: active conversation continuation. Once a human is actively talking
+  // WITH this bot, it stays engaged until the human stops or redirects to
+  // another bot -- both already handled above (isActiveConvo returns false the
+  // moment the user names a different bot, and the partner check yields when a
+  // different human is the one posting). We deliberately do NOT yield here just
+  // because a sibling bot also spoke recently: dropping out of a live
+  // conversation the human is still driving reads as rude and is the root of
+  // the "why did you stop responding" complaint. The bot's own cooldown
+  // (checked above) is the only throttle that still applies.
   if (inConvo) {
-    for (const m of recent) {
-      const uid = m.user_id || "";
-      if (uid !== botId && uid.startsWith("bot_") && now - m.created_at < CROSS_BOT_GUARD_MS) {
-        return { respond: false, reason: "another bot just spoke (Tier 0 yield)" };
-      }
-    }
     return { respond: true, reason: "active conversation", nameMention: true };
   }
 

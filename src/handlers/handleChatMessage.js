@@ -159,6 +159,21 @@ async function resolveGifImageBytes(url) {
       }
     }
   }
+
+  // Giphy share/embed pages often do not expose a usable og:image to a bare
+  // server-side fetch (the page is JS-rendered), so the HTML path above comes
+  // up empty. Derive the gif id from the URL slug -- giphy.com/gifs/<words>-<id>,
+  // /gifs/<id>, /embed/<id> -- and hit the media CDN directly, which always
+  // returns raw gif bytes. This is what makes Giphy-picker links actually
+  // resolve, not just Tenor links and direct media URLs.
+  const giphyId = url.match(/giphy\.com\/(?:gifs|embed|media|stickers|clips)\/(?:[^/?#]*-)?([A-Za-z0-9]{6,})/i);
+  if (giphyId) {
+    const r3 = await fetch(`https://media.giphy.com/media/${giphyId[1]}/giphy.gif`, { signal: AbortSignal.timeout(10000), headers });
+    if (r3.ok) {
+      const ct3 = (r3.headers.get("content-type") || "image/gif").toLowerCase().split(";")[0].trim();
+      if (ct3.startsWith("image/")) return { buf: await r3.arrayBuffer(), mime: ct3 };
+    }
+  }
   return null;
 }
 
@@ -1546,14 +1561,23 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
       // time this pipeline re-fetched `recent`, the faster bot's reply is
       // almost always already present, so suppress when our candidate shares a
       // 5+ word phrase with any OTHER bot's recent message.
-      const otherBotBodies = (recent || [])
-        .filter((m) => typeof m.user_id === "string" && m.user_id.startsWith("bot_") && m.user_id !== botId)
-        .map((m) => m.body)
-        .filter(Boolean);
-      const echoed = findRepeatedPhrase(cleaned, otherBotBodies);
-      if (echoed) {
-        console.warn(`[watercooler] ${config.botName} cross-bot duplicate suppressed (phrase: "${echoed}"): ${cleaned.slice(0, 80)}`);
-        return;
+      //
+      // ONLY applies to pure ambient chime-ins. When this bot is engaged
+      // (nameMention -- a direct @mention, a name mention, OR an active
+      // back-and-forth, all of which set nameMention=true upstream) it must
+      // stay engaged until the human stops; silently dropping a directly-
+      // addressed reply because a sibling happened to use a similar phrase
+      // reads as rude and is exactly the "stopped responding" complaint.
+      if (!nameMention) {
+        const otherBotBodies = (recent || [])
+          .filter((m) => typeof m.user_id === "string" && m.user_id.startsWith("bot_") && m.user_id !== botId)
+          .map((m) => m.body)
+          .filter(Boolean);
+        const echoed = findRepeatedPhrase(cleaned, otherBotBodies);
+        if (echoed) {
+          console.warn(`[watercooler] ${config.botName} cross-bot duplicate suppressed (phrase: "${echoed}"): ${cleaned.slice(0, 80)}`);
+          return;
+        }
       }
       // Only thread when the human's message was already in a thread.
       // Posting top-level here keeps watercooler replies in the main channel
