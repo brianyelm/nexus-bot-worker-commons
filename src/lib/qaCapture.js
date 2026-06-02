@@ -154,7 +154,7 @@ function _computeComplianceMeta(detailStr, userMeta = {}) {
  * @returns {void}
  */
 export function captureCronRun(env, ctx, opts = {}) {
-  const { bot, name, run, cron, provenance = "scheduled-cron" } = opts;
+  const { bot, name, run, cron, provenance = "scheduled-cron", forceCapture = false } = opts;
   if (typeof run !== "function") {
     console.warn(`[captureCronRun] missing run fn for bot=${bot} name=${name}`);
     return;
@@ -162,6 +162,10 @@ export function captureCronRun(env, ctx, opts = {}) {
   ctx.waitUntil((async () => {
     try {
       const r = await withProvenance(provenance, () => run());
+      // forceCapture: record the QA row even when the job returns nothing.
+      // The no-op suppressor drops results that serialize to "null", which
+      // silently hides work-product jobs that do their work via side effects
+      // (e.g. content drafters that post to a channel and `return` undefined).
       await captureQa(env, {
         bot,
         kind: `cron.${name}`,
@@ -170,7 +174,7 @@ export function captureCronRun(env, ctx, opts = {}) {
         summary: `${name} ok`,
         detail: JSON.stringify(r ?? null).slice(0, MAX_DETAIL),
         meta: { cron },
-      });
+      }, { forceCapture });
     } catch (err) {
       console.error(`[cron] ${name} failed:`, err?.stack || err);
       await captureQa(env, {
