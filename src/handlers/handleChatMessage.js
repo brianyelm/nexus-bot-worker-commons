@@ -1378,6 +1378,11 @@ const META_LEAK_PATTERNS = [
   /\b(can('|no)?t|cannot|unable to)\b.{0,25}\b(view|see|open|load|access)\b.{0,25}\b(gif|image|video|link|clip)\b/i,
   /\bfake a reaction\b/i,
   /\bthe link (is|isn'?t|won'?t|wont|is not)\b.{0,20}\b(work|working|load|loading|open|opening|broken)\b/i,
+  // Generic load-failure narration ("can't load that one on my end", "it
+  // didn't load for me"). An off-the-clock coworker has no reason to announce
+  // a technical load failure -- suppressing it always beats posting it.
+  /\b(can'?t|cannot|couldn'?t|won'?t|wont|didn'?t|doesn'?t|wouldn'?t|isn'?t)\s+(?:\w+\s+){0,2}load(?:ing|ed)?\b/i,
+  /\bload(?:ing|ed)?\b[^.!?\n]{0,15}\b(on my end|for me|over here|on my side)\b/i,
 ];
 
 function looksLikeWatercoolerMetaLeak(text) {
@@ -1624,16 +1629,30 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     try {
       response = await callAnthropic(env, fullSystemPrompt, messages, wcCallOpts);
     } catch (err) {
-      // An oversized or animated GIF can make Anthropic reject the multimodal
-      // call. Never let that swallow the reply: strip the media and retry once
-      // text-only so the bot still responds (it just won't see the image).
+      // An oversized / animated / unsupported GIF can make Anthropic reject the
+      // multimodal call. The bot is now blind to the image -- it must NOT fall
+      // back to announcing "can't load that one on my end" (the human-illusion
+      // tell that kicked off this whole thread).
       if (wcGifBlocks.length === 0) throw err;
-      console.warn(`[watercooler] ${config.botName} multimodal call failed, retrying text-only:`, err?.message);
-      const lastMsg = messages[messages.length - 1];
-      if (Array.isArray(lastMsg.content)) {
-        const textBlock = lastMsg.content.find((b) => b.type === "text");
-        lastMsg.content = textBlock ? textBlock.text : "";
+      console.warn(`[watercooler] ${config.botName} GIF unusable (multimodal rejected):`, err?.message);
+      // Ambient chime-in whose only hook was a GIF it can't see -> stay quiet.
+      if (!nameMention) {
+        console.warn(`[watercooler] ${config.botName} ambient GIF unusable, skipping chime-in`);
+        return;
       }
+      // Direct mention: must respond. Retry text-only, but strip the now-false
+      // "[A GIF is attached above...]" note and tell the model not to pretend to
+      // see it or narrate a load failure.
+      const lastMsg = messages[messages.length - 1];
+      const baseText = Array.isArray(lastMsg.content)
+        ? (lastMsg.content.find((b) => b.type === "text")?.text || "")
+        : (typeof lastMsg.content === "string" ? lastMsg.content : "");
+      const withoutGifNote = baseText.replace(/\n\n\[A GIF is attached above[\s\S]*$/i, "").trim();
+      lastMsg.content =
+        (withoutGifNote || "Respond to the latest message.") +
+        `\n\n[The image they shared could not be shown to you. Do NOT describe it, claim to see it, ` +
+        `or say it would not load / that you cannot view it. React like a person whose preview did not ` +
+        `load (one short curious line, e.g. "ha what is that"), or just answer the rest of what they said.]`;
       response = await callAnthropic(env, fullSystemPrompt, messages, wcCallOpts);
     }
 
