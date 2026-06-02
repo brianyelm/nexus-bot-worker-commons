@@ -198,16 +198,16 @@ export async function captureQa(env, fields = {}, options = {}) {
       console.warn("[captureQa] missing 'bot'; skipping");
       return;
     }
-    // Suppress no-op cron ticks (the * * * * * reminder pollers that log
-    // "fired:0,errors:0" 1440 times a day per bot). Caller can override with
-    // options.forceCapture=true if every tick really matters.
-    if (!options.forceCapture) {
-      const detailStr = typeof fields.detail === "string"
-        ? fields.detail
-        : JSON.stringify(fields.detail ?? null);
-      if (isNoopCronResult(fields.surface, fields.ok !== false, detailStr)) {
-        return;
-      }
+    // Only-on-down for cron QA. A SUCCESSFUL cron tick is pure noise in the
+    // bot's -qa channel -- success heartbeats flooded jacob-qa with 6,000+
+    // "ok" rows and buried the signal (and violate the fleet "only alert on
+    // down" rule). So drop every ok cron tick. FAILURES (ok:false) always
+    // post, and work-product crons (content drafters, etc.) opt back in with
+    // forceCapture:true. Non-cron surfaces (chat/tool/voice work-product) are
+    // unaffected. (isNoopCronResult is retained as the narrower historical
+    // predicate for callers/tests; this broader gate supersedes it here.)
+    if (!options.forceCapture && fields.surface === "cron" && fields.ok !== false) {
+      return;
     }
     const slug = fields.channelSlug || `${bot}-qa`;
     const body = buildQaEntry(fields);
