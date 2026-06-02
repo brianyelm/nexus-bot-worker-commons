@@ -37,6 +37,7 @@ export { loadHistory, appendHistory } from "./lib/history.js";
 export { rememberFact, forgetFact, listFacts, buildFactsBlock } from "./lib/memory.js";
 export { resolveEntity, getEntityContext, persistTurnPair, assertFact } from "./lib/memoryService.js";
 export { buildContactRecall } from "./lib/memoryRecall.js";
+export { senderTrust } from "./lib/mailTrust.js";
 export { postToNexus, uploadBotAttachment, attachButtons, attachModals, editNexusMessage, fetchChannelMessages, fetchThreadMessages, sendNexusHeartbeat, sendTyping, pingBotPresence } from "./lib/nexus.js";
 export { captureQa, captureCronRun, buildQaEntry, isNoopCronResult } from "./lib/qaCapture.js";
 export { withProvenance, getProvenanceContext } from "./lib/provenanceContext.js";
