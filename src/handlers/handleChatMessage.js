@@ -800,7 +800,7 @@ export async function runLlmPipeline({
     let memoryRecallBlock = "";
     if (env.MEMORY && config.botName && config.memoryRecall?.enabled !== false) {
       try {
-        memEntityId = await resolveEntity(env, config.botName, { userId: user_id, displayName: display_name });
+        memEntityId = await resolveEntity(env, config.botName, { userId: user_id, email: user_email, displayName: display_name });
         if (memEntityId) {
           const memCtx = await getEntityContext(env, config.botName, memEntityId, userText);
           memoryRecallBlock = buildMemoryRecallBlock(memCtx, historyKey);
@@ -1027,7 +1027,7 @@ export async function runLlmPipeline({
       let entityId = memEntityId;
       if (!entityId) {
         try {
-          entityId = await resolveEntity(env, config.botName, { userId: user_id, displayName: display_name });
+          entityId = await resolveEntity(env, config.botName, { userId: user_id, email: user_email, displayName: display_name });
         } catch { /* fall through */ }
       }
       if (!entityId) return { error: "Could not resolve who to remember this for." };

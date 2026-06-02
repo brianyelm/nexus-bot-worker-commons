@@ -80,23 +80,34 @@ export async function persistTurnPair(env, botId, { sessionId, entityId, userTex
 }
 
 /**
- * Resolve or create a memory entity for a Nexus user.
- * Returns the entity_id for subsequent turn/fact storage.
+ * Resolve or create a memory entity for a person, keyed by whichever stable
+ * identifiers are known on this surface: Nexus user_id (chat), email (email
+ * pollers), and/or phone (voice). The memory-worker merges by external_id, so
+ * passing more than one id links them onto the SAME entity -- this is what
+ * lets an email sender resolve to the entity the chat/voice surfaces built,
+ * giving cross-surface recall parity. Returns the entity_id.
  *
  * @param {object} env
  * @param {string} botId
  * @param {object} params
- * @param {string} params.userId - Nexus user_id
+ * @param {string} [params.userId] - Nexus user_id
+ * @param {string} [params.email] - sender/author email (lowercased for stable match)
+ * @param {string} [params.phone] - caller phone in E.164
  * @param {string} [params.displayName]
  * @param {string} [params.type] - Entity type (default: 'contact')
  * @returns {Promise<string|null>} entity_id or null
  */
-export async function resolveEntity(env, botId, { userId, displayName, type = 'contact' }) {
+export async function resolveEntity(env, botId, { userId, email, phone, displayName, type = 'contact' }) {
   if (!env.MEMORY) return null;
+  const externalIds = {};
+  if (userId) externalIds.nexus_user_id = userId;
+  if (email) externalIds.email = String(email).trim().toLowerCase();
+  if (phone) externalIds.phone = phone;
+  if (Object.keys(externalIds).length === 0) return null;
   const result = await memoryFetch(env, botId, '/entities', {
     type,
-    display_name: displayName || userId,
-    external_ids: { nexus_user_id: userId },
+    display_name: displayName || userId || email || phone,
+    external_ids: externalIds,
   });
   return result?.id || null;
 }
