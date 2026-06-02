@@ -1373,6 +1373,11 @@ const META_LEAK_PATTERNS = [
   /\bresponding to \w+'s (question|message|comment)\b/i,
   /\bnot (going to|gonna) (respond|reply|engage)\b/i,
   /\bjust going to ignore\b/i,
+  // GIF/image fetch-failure narration -- breaks the human feel ("I cannot
+  // actually view the GIF at that link, so I don't want to fake a reaction").
+  /\b(can('|no)?t|cannot|unable to)\b.{0,25}\b(view|see|open|load|access)\b.{0,25}\b(gif|image|video|link|clip)\b/i,
+  /\bfake a reaction\b/i,
+  /\bthe link (is|isn'?t|won'?t|wont|is not)\b.{0,20}\b(work|working|load|loading|open|opening|broken)\b/i,
 ];
 
 function looksLikeWatercoolerMetaLeak(text) {
@@ -1412,6 +1417,25 @@ function findRepeatedPhrase(response, comparisonBodies) {
 }
 
 /**
+ * Detect a low-content impatient nudge ("answer me pls", "you there?", "??").
+ * When a person fires one of these right after a real question, the nudge is
+ * NOT the thing to answer -- the question one message up is. Greetings ("hey
+ * wren") deliberately do NOT count: those just get greeted back.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+function isImpatientNudge(text) {
+  const stripped = (text || "").replace(/@\S+/g, "").trim();
+  if (!stripped) return false;
+  if (/^\?+$/.test(stripped)) return true;
+  const t = stripped.toLowerCase().replace(/[^\w\s]/g, " ").trim();
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length > 5) return false;
+  return /\b(answer|respond|reply|hello+|anyone|you there|u there|still there|come on|waiting|did you (see|get)|you up)\b/.test(t);
+}
+
+/**
  * Lightweight watercooler LLM pipeline. Uses channel history as context
  * (group conversation, not per-user), Haiku model, no tools, short replies.
  * Persona comes from config.watercooler.systemPrompt.
@@ -1436,6 +1460,7 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     "- Do NOT punt a casual question, joke, or invitation to another coworker ('ask Robert', 'that's more Dexter's thing', 'you'd want so-and-so for that'). Engage with it YOURSELF like a person would, even if it is outside your usual interests. Riff on it, joke back, or ask a follow-up. Naming another bot to dodge is a cop-out.",
     "- Do NOT repeat openers, phrases, denials, or explanations from your previous messages in this conversation. If you already explained who Ferris is, or denied being crabby, or shared a hobby fact -- do not say it again. Each reply should be fresh.",
     "- You have personality and backbone. If someone disrespects you, push back like a real person would. Don't just roll over.",
+    "- Match the other person's tone and energy, including blunt, crude, or edgy humor. Pushing back means firing back with a joke or a dry jab, NOT policing how they talk. Never play hall monitor: do not correct, lecture, or moralize about someone's word choice ('that word is not it', 'you know better'). Brush it off or volley back like a friend would.",
     "- If someone asks you to do something you literally cannot do (send a photo, share a link, etc.), say so naturally ('man I wish, my phone's in the other room' or 'I don't have one handy').",
     "- Banter, jokes, edgy humor, hobbies, and small talk are NOT work -- engage with them directly. ONLY redirect to a work channel if someone genuinely asks you to DO A JOB TASK here (open a ticket, pull a report, run a scan, fix something). When you do redirect real work, use humor ('off the clock, hit me up Monday') and NEVER cite your role or 'jurisdiction' as the reason. Don't pivot to a random unrelated topic.",
     "- If they share something genuine (pride, frustration, a moment), acknowledge it warmly before moving on. Don't deflect to 'what do you want to talk about?' -- that's cold.",
@@ -1486,10 +1511,36 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     // model responds to the actual trigger, not to older messages it finds
     // more interesting. The trigger message is the one that caused this
     // callback to fire -- everything earlier is just history.
-    if (nameMention && triggerDisplayName && triggerBody) {
+    //
+    // Applied to BOTH direct mentions AND ambient chime-ins. Ambient replies
+    // that free-associated across channel history answered a DIFFERENT message
+    // than the one just posted (e.g. riffing on an old clip while a coworker's
+    // direct question went ignored).
+    //
+    // Nudge redirect: if the triggering message is a bare impatient nudge
+    // ("answer me pls", "??"), the real question is the same person's previous
+    // substantive message -- answer THAT, not the nudge. Without this, a bot
+    // replied "hey, what's up!" to "answer me pls" while the actual question
+    // sat one message above, unanswered.
+    if (triggerDisplayName && triggerBody) {
+      let focusBody = triggerBody;
+      let nudgeNote = "";
+      if (isImpatientNudge(triggerBody) && triggerUserId) {
+        for (let i = (recent || []).length - 1; i >= 0; i--) {
+          const m = recent[i];
+          if (m.user_id !== triggerUserId) continue;
+          const b = (m.body || "").trim();
+          if (!b || b === triggerBody.trim() || isImpatientNudge(b)) continue;
+          focusBody = b;
+          nudgeNote = "They already asked this and are now waiting on you, so answer it directly -- do not just greet them. ";
+          break;
+        }
+      }
       messages[messages.length - 1] = {
         role: "user",
-        content: `${triggerDisplayName} just said this -- this is the message you MUST respond to:\n\n"${triggerBody.slice(0, 500)}"\n\n(History above is just context. Answer ${triggerDisplayName}'s current message directly. If they asked a question, answer it. If they greeted you, greet back.)`,
+        content: nameMention
+          ? `${nudgeNote}${triggerDisplayName} is talking to you. This is the message you MUST respond to:\n\n"${focusBody.slice(0, 500)}"\n\n(History above is just context. Answer ${triggerDisplayName} directly. If they asked a question, ANSWER it -- do not deflect with a greeting. If they greeted you, greet back.)`
+          : `${nudgeNote}React to THIS specific message ${triggerDisplayName} just posted:\n\n"${focusBody.slice(0, 500)}"\n\n(The messages above are older context. Do NOT answer or react to an earlier message, an old clip, or a GIF that scrolled by -- respond to what ${triggerDisplayName} just said here.)`,
       };
     }
 
@@ -1530,6 +1581,31 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
         console.warn(`[watercooler] ${config.botName} GIF fetch failed:`, err?.message);
       }
     }
+
+    // GIF was present but we could not load the image bytes (unsupported host,
+    // JS-rendered share page, oversized, or transient fetch failure). The bot
+    // must NOT announce "I cannot view the GIF at that link" -- that breaks the
+    // human feel (it is what made Courtney narrate a fetch failure out loud).
+    //  - Ambient: a coworker who can't load a GIF just doesn't comment. Skip.
+    //  - Mention: stay responsive, but react like a person whose preview did
+    //    not load -- never claim to see it, never narrate the failure.
+    const gifUnviewable = focusGifUrls.length > 0 && wcGifBlocks.length === 0;
+    if (gifUnviewable && !nameMention) {
+      console.warn(`[watercooler] ${config.botName} ambient GIF unviewable, skipping chime-in`);
+      return;
+    }
+    if (gifUnviewable && nameMention) {
+      const lastMsg = messages[messages.length - 1];
+      if (typeof lastMsg.content === "string") {
+        lastMsg.content +=
+          `\n\n[They shared an image you could not load. Do NOT describe it, claim to see it, ` +
+          `or say you cannot view it / that the link is broken. If their message is ONLY the image, ` +
+          `react like a person whose preview did not load -- one short, warm, curious line ` +
+          `("ha what is that" or "you cannot just send that with no caption"). Otherwise just answer ` +
+          `the rest of what they said.]`;
+      }
+    }
+
     if (wcGifBlocks.length > 0) {
       const lastMsg = messages[messages.length - 1];
       const lastText = typeof lastMsg.content === "string" ? lastMsg.content : "";
