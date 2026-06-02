@@ -1503,19 +1503,22 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     // channel (which made bots answer about stale GIFs, or confabulate from
     // ambient channel chatter when asked "what is in this GIF?").
     //  - If the trigger message itself carries a GIF, that's the subject.
-    //  - Otherwise walk back to the newest channel message bearing a GIF.
-    // `recent` is oldest->newest, so we scan from the end.
+    //  - Otherwise the GIF is the subject ONLY if it IS the most-recent
+    //    channel message. We deliberately do NOT walk further back: doing so
+    //    made multiple bots caption a stale GIF while replying to an unrelated
+    //    text message (e.g. all describing a "big brain" robot meme in reply
+    //    to someone's journaling comment). If the latest message is text, the
+    //    bot reacts to that text, not to whatever image was scrolled up.
+    // `recent` is oldest->newest, so the subject is the last element.
     const triggerGifUrls = extractGifUrls(triggerBody || "");
     let focusGifUrls = [];
     if (triggerGifUrls.length > 0) {
       focusGifUrls = [triggerGifUrls[triggerGifUrls.length - 1]];
-    } else {
-      for (let i = (recent || []).length - 1; i >= 0; i--) {
-        const found = extractGifUrls(recent[i].body || "");
-        if (found.length > 0) {
-          focusGifUrls = [found[found.length - 1]];
-          break;
-        }
+    } else if ((recent || []).length > 0) {
+      const latest = recent[recent.length - 1];
+      const found = extractGifUrls(latest.body || "");
+      if (found.length > 0) {
+        focusGifUrls = [found[found.length - 1]];
       }
     }
     let wcGifBlocks = [];
@@ -1531,9 +1534,12 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
       const lastMsg = messages[messages.length - 1];
       const lastText = typeof lastMsg.content === "string" ? lastMsg.content : "";
       const focusNote =
-        `${lastText}\n\n[The most recent GIF in the channel is attached above. If asked what it ` +
-        `is or to react to it, answer ONLY from what you actually SEE in that image -- do not guess ` +
-        `from earlier channel chatter or what you remember people talking about.]`;
+        `${lastText}\n\n[A GIF is attached above and it is part of the message you are replying to. ` +
+        `React to it the way a coworker would in chat -- riff on it, joke, one quick natural line -- ` +
+        `grounded in what you actually SEE. Do NOT narrate or caption the image ("looks like a robot ` +
+        `pointing at its head"); a person reacts, they don't describe. Only if someone explicitly asks ` +
+        `what it is should you describe it, and then ONLY from what you see -- never guess from earlier ` +
+        `channel chatter or what you remember people talking about.]`;
       lastMsg.content = [...wcGifBlocks, { type: "text", text: focusNote }];
     }
 
