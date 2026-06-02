@@ -19,5 +19,9 @@
 
 import FLEET_OUTPUT_STYLE from "./FLEET_OUTPUT_STYLE.md";
 import FLEET_CLIENT_CODES from "./FLEET_CLIENT_CODES.md";
+// Confidence + grace block for the women on the fleet (Courtney, Kate, Moxie,
+// Wren). Opt-in named export: only those personas import it, so the male bots'
+// prompts are untouched.
+import SELF_ASSURED_CHARM from "./SELF_ASSURED_CHARM.md";
 
-export { FLEET_OUTPUT_STYLE, FLEET_CLIENT_CODES };
+export { FLEET_OUTPUT_STYLE, FLEET_CLIENT_CODES, SELF_ASSURED_CHARM };
