@@ -12,14 +12,17 @@
 //   extraction.
 // =============================================================================
 
+import { buildMemoryAuthHeaders } from './memoryAuth.js';
+
 const BOT_HEADER = 'X-Memory-Bot';
 
 async function memoryFetch(env, botId, path, body) {
   if (!env.MEMORY) return null;
   try {
+    const auth = await buildMemoryAuthHeaders(env, botId);
     const resp = await env.MEMORY.fetch(new Request(`https://internal${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', [BOT_HEADER]: botId },
+      headers: { 'Content-Type': 'application/json', [BOT_HEADER]: botId, ...auth },
       body: JSON.stringify(body),
     }));
     if (!resp.ok) {
@@ -36,9 +39,10 @@ async function memoryFetch(env, botId, path, body) {
 async function memoryGet(env, botId, path) {
   if (!env.MEMORY) return null;
   try {
+    const auth = await buildMemoryAuthHeaders(env, botId);
     const resp = await env.MEMORY.fetch(new Request(`https://internal${path}`, {
       method: 'GET',
-      headers: { [BOT_HEADER]: botId },
+      headers: { [BOT_HEADER]: botId, ...auth },
     }));
     if (!resp.ok) return null;
     return await resp.json();
