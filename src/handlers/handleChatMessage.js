@@ -1513,7 +1513,15 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     const messages = [];
     const botId = `bot_${config.botName}`;
 
-    for (const m of (recent || []).reverse()) {
+    // Nexus returns channel messages OLDEST-first (ascending created_at) -- the
+    // same ordering the main pipeline's channel-context harvest relies on
+    // (recent[0] is the oldest, recent[recent.length - 1] the newest). Do NOT
+    // reverse: a stray reverse() here inverted the whole array, so the
+    // conversation reached the model backwards AND the "latest message" GIF
+    // check below pointed at the OLDEST message in the window -- which is why a
+    // just-posted GIF was never seen (it looked at "good morning" from hours
+    // ago). messages[] must be oldest -> newest for Anthropic.
+    for (const m of (recent || [])) {
       if (m.user_id === "system") continue;
       const isMe = m.user_id === botId;
       messages.push({
@@ -1575,22 +1583,35 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     // channel (which made bots answer about stale GIFs, or confabulate from
     // ambient channel chatter when asked "what is in this GIF?").
     //  - If the trigger message itself carries a GIF, that's the subject.
-    //  - Otherwise the GIF is the subject ONLY if it IS the most-recent
-    //    channel message. We deliberately do NOT walk further back: doing so
-    //    made multiple bots caption a stale GIF while replying to an unrelated
-    //    text message (e.g. all describing a "big brain" robot meme in reply
-    //    to someone's journaling comment). If the latest message is text, the
-    //    bot reacts to that text, not to whatever image was scrolled up.
-    // `recent` is oldest->newest, so the subject is the last element.
+    //  - Otherwise look back through recent channel messages (newest -> older)
+    //    for the most-recent GIF. The common real pattern is: someone posts a
+    //    GIF, then a SEPARATE message asking about it ("@bot what's in this?").
+    //    The GIF is not in the trigger text, so checking only the trigger (or
+    //    only the single newest message) misses it entirely -- which is exactly
+    //    why the bot kept saying "I can't see GIFs" to a GIF posted a message
+    //    earlier.
+    //  - How far back depends on engagement, to keep the old anti-stale-caption
+    //    guard for pure ambient chatter:
+    //      * Direct engagement (nameMention -- a mention, name, or active
+    //        back-and-forth): the person is explicitly asking, so scan back a
+    //        few messages for the GIF they mean.
+    //      * Pure ambient chime-in: only treat a GIF as the subject if it is
+    //        the very newest message. Walking back here is what made bots
+    //        caption a stale GIF while replying to an unrelated text message.
+    // `recent` is oldest->newest, so the newest message is the last element.
     const triggerGifUrls = extractGifUrls(triggerBody || "");
     let focusGifUrls = [];
     if (triggerGifUrls.length > 0) {
       focusGifUrls = [triggerGifUrls[triggerGifUrls.length - 1]];
     } else if ((recent || []).length > 0) {
-      const latest = recent[recent.length - 1];
-      const found = extractGifUrls(latest.body || "");
-      if (found.length > 0) {
-        focusGifUrls = [found[found.length - 1]];
+      const lookback = nameMention ? 5 : 1;
+      const end = Math.max(0, recent.length - lookback);
+      for (let i = recent.length - 1; i >= end; i--) {
+        const found = extractGifUrls(recent[i].body || "");
+        if (found.length > 0) {
+          focusGifUrls = [found[found.length - 1]];
+          break;
+        }
       }
     }
     let wcGifBlocks = [];
@@ -1670,39 +1691,6 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
         `or say it would not load / that you cannot view it. React like a person whose preview did not ` +
         `load (one short curious line, e.g. "ha what is that"), or just answer the rest of what they said.]`;
       response = await callAnthropic(env, fullSystemPrompt, messages, wcCallOpts);
-    }
-
-    // TEMP DIAGNOSTIC (GIF vision): when env.WC_GIF_DEBUG is set, persist the
-    // actual GIF-decision values for this watercooler run to KV so they can be
-    // read back via a test route -- bypasses wrangler-tail buffering and the
-    // probabilistic ambient dispatch. Gated so only the flagged bot writes.
-    // REMOVE with the matching /test/gif-debug route once root cause is fixed.
-    if (env.WC_GIF_DEBUG) {
-      try {
-        const kv = env[config.cacheBinding] || env.CACHE;
-        if (kv) {
-          await kv.put(
-            `wc-gif-debug:${config.botName}`,
-            JSON.stringify({
-              ts: Date.now(),
-              trigger_type_seen: nameMention ? "nameMention" : "ambient",
-              triggerBody: (triggerBody || "").slice(0, 240),
-              triggerGifUrlCount: extractGifUrls(triggerBody || "").length,
-              focusGifUrls,
-              wcGifBlocks: wcGifBlocks.length,
-              gifUnviewable: focusGifUrls.length > 0 && wcGifBlocks.length === 0,
-              recentLast: (() => {
-                const last = (recent || [])[(recent || []).length - 1];
-                return last ? `${last.display_name || last.user_id}: ${(last.body || "").slice(0, 160)}` : null;
-              })(),
-              response: (response || "").slice(0, 240),
-            }),
-            { expirationTtl: 3600 }
-          );
-        }
-      } catch (e) {
-        console.warn("[watercooler] WC_GIF_DEBUG write failed:", e?.message);
-      }
     }
 
     if (response && response.trim()) {
