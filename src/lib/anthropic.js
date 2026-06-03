@@ -250,7 +250,49 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
   while (response.stop_reason === "tool_use") {
     iterations++;
     if (iterations > MAX_TOOL_ITERATIONS) {
-      console.warn(`[anthropic] tool_loop_limit reached after ${iterations} iterations`);
+      // The model still wants tools but has spent its budget. Breaking here
+      // leaves `response` holding only tool_use blocks, so extractText() returns
+      // "" and the caller posts nothing -- the user watches the typing indicator
+      // resolve to silence. Instead, feed the pending tool_use blocks a
+      // "budget exhausted" result and make ONE final call with tool_choice
+      // "none" so the model MUST answer in plain text from what it has.
+      console.warn(`[anthropic] tool_loop_limit reached after ${iterations} iterations; forcing a final text answer`);
+      const pendingAssistant = response.content || [];
+      workingMessages.push({ role: "assistant", content: pendingAssistant });
+      const pendingToolUses = pendingAssistant.filter(b => b.type === "tool_use");
+      if (pendingToolUses.length > 0) {
+        workingMessages.push({
+          role: "user",
+          content: pendingToolUses.map(b => ({
+            type: "tool_result",
+            tool_use_id: b.id,
+            content:
+              "Tool-call budget reached. Do not request any more tools. Answer the user " +
+              "now in plain text using the information you already gathered.",
+          })),
+        });
+      } else {
+        workingMessages.push({
+          role: "user",
+          content:
+            "Answer the user now in plain text using what you already have. Do not call any more tools.",
+        });
+      }
+      try {
+        response = await _post(apiKey, {
+          ...baseParams,
+          tool_choice: { type: "none" },
+          messages: applyCacheToLastMessage(workingMessages),
+        });
+        if (response.usage) {
+          usageAcc.input_tokens += response.usage.input_tokens || 0;
+          usageAcc.output_tokens += response.usage.output_tokens || 0;
+          usageAcc.cache_creation_input_tokens += response.usage.cache_creation_input_tokens || 0;
+          usageAcc.cache_read_input_tokens += response.usage.cache_read_input_tokens || 0;
+        }
+      } catch (err) {
+        console.error("[anthropic] forced final-answer call failed:", err.message);
+      }
       break;
     }
 

@@ -1322,6 +1322,21 @@ export async function runLlmPipeline({
         }
       }
     }
+  } else if (!stagedAction) {
+    // The model returned no text and we staged no HITL card. Posting nothing
+    // leaves the user staring at a typing indicator that resolves to silence
+    // (the failure mode behind Brian's dropped scheduling request). Post a
+    // short, honest fallback so the turn never just vanishes.
+    try {
+      await postToNexus(
+        env,
+        channel_slug,
+        "I worked through that but did not land on a clean answer. Give me one more detail or rephrase it and I will take another pass.",
+        nexusOptions,
+      );
+    } catch (err) {
+      console.error("[handleChatMessage] fallback post error:", err.message);
+    }
   }
 
   // QA capture (best-effort, no LLM). Mirrors this chat turn to <bot>-qa for the
@@ -1655,6 +1670,39 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
         `or say it would not load / that you cannot view it. React like a person whose preview did not ` +
         `load (one short curious line, e.g. "ha what is that"), or just answer the rest of what they said.]`;
       response = await callAnthropic(env, fullSystemPrompt, messages, wcCallOpts);
+    }
+
+    // TEMP DIAGNOSTIC (GIF vision): when env.WC_GIF_DEBUG is set, persist the
+    // actual GIF-decision values for this watercooler run to KV so they can be
+    // read back via a test route -- bypasses wrangler-tail buffering and the
+    // probabilistic ambient dispatch. Gated so only the flagged bot writes.
+    // REMOVE with the matching /test/gif-debug route once root cause is fixed.
+    if (env.WC_GIF_DEBUG) {
+      try {
+        const kv = env[config.cacheBinding] || env.CACHE;
+        if (kv) {
+          await kv.put(
+            `wc-gif-debug:${config.botName}`,
+            JSON.stringify({
+              ts: Date.now(),
+              trigger_type_seen: nameMention ? "nameMention" : "ambient",
+              triggerBody: (triggerBody || "").slice(0, 240),
+              triggerGifUrlCount: extractGifUrls(triggerBody || "").length,
+              focusGifUrls,
+              wcGifBlocks: wcGifBlocks.length,
+              gifUnviewable: focusGifUrls.length > 0 && wcGifBlocks.length === 0,
+              recentLast: (() => {
+                const last = (recent || [])[(recent || []).length - 1];
+                return last ? `${last.display_name || last.user_id}: ${(last.body || "").slice(0, 160)}` : null;
+              })(),
+              response: (response || "").slice(0, 240),
+            }),
+            { expirationTtl: 3600 }
+          );
+        }
+      } catch (e) {
+        console.warn("[watercooler] WC_GIF_DEBUG write failed:", e?.message);
+      }
     }
 
     if (response && response.trim()) {
