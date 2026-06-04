@@ -22,6 +22,7 @@
 
 import { postToNexus, attachButtons, attachModals } from "./nexus.js";
 import { BUTTON_LABELS, buttonId } from "./buttonId.js";
+import { linkButtons } from "./appLinks.js";
 import { routeApprovalChannel } from "./channelRouter.js";
 import { nexusTimestamp, PALETTE } from "./format.js";
 
@@ -47,6 +48,10 @@ const DEFAULT_DB_BINDING = "DB";
  *   defaults) or richer overrides: [{verb, label?, style?}]. Default:
  *   ["approve","deny"]. The approve/deny pair gets legacy button_id format
  *   for processButtonClick compatibility.
+ * @param {Array<{label:string,url:string|null,style?:string}>} [params.links]
+ *   Optional deep-link url-buttons (e.g. {label:"View in Xero", url}). Each is
+ *   rendered as a Nexus url-button that opens in a new tab; specs whose url is
+ *   null/unbuildable are silently dropped. Appended after the action buttons.
  * @param {object} [params.modal]      - optional { trigger, title, fields, modalId? }
  *                                       trigger ∈ BUTTON_LABELS keys (e.g. "edit").
  * @param {string} [params.channelSlug]   - override resolved channel
@@ -72,6 +77,7 @@ export async function postHitlCard(env, params = {}) {
     severity,
     sections = [],
     buttons = ["approve", "deny"],
+    links,
     modal,
     requesterUserId,
     actionPayload,
@@ -117,6 +123,12 @@ export async function postHitlCard(env, params = {}) {
   const buttonDescriptors = _resolveButtons(buttons, {
     messageId, kind, approvalId, callbackUrl,
   });
+  // Optional deep-link url-buttons ("Open in Xero", etc.) ride alongside the
+  // approve/deny callback buttons in the same attach call. linkButtons drops
+  // any spec whose url couldn't be built, so a missing config var = no button.
+  if (Array.isArray(links) && links.length > 0) {
+    buttonDescriptors.push(...linkButtons(links));
+  }
   if (buttonDescriptors.length > 0) {
     try {
       await attachButtons(env, messageId, buttonDescriptors, nexusOptions);

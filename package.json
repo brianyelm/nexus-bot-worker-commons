@@ -22,6 +22,7 @@
     "./lib/memoryService": "./src/lib/memoryService.js",
     "./lib/format": "./src/lib/format.js",
     "./lib/embedCard": "./src/lib/embedCard.js",
+    "./lib/appLinks": "./src/lib/appLinks.js",
     "./lib/mimeEmail": "./src/lib/mimeEmail.js",
     "./persona-blocks": "./src/persona-blocks/index.js",
     "./contracts": "./contracts/index.js",

@@ -54,6 +54,24 @@ export { notifyEmailDown, BOT_HOME_CHANNELS } from "./lib/emailBackup.js";
 export { postApprovalCard, processButtonClick } from "./lib/hitl.js";
 export { postHitlCard, renderHitlCard } from "./lib/hitlCard.js";
 export {
+  linkButton,
+  linkButtons,
+  linkButtonId,
+  attachLinkButtons,
+  xeroBankAccountUrl,
+  xeroBillUrl,
+  xeroInvoiceUrl,
+  s1ThreatUrl,
+  scCaseUrl,
+  ninjaDeviceUrl,
+  ninjaTicketUrl,
+  crmRecordUrl,
+  docusignEnvelopeUrl,
+  dattoDeviceUrl,
+  boxFileUrl,
+  cdwProductUrl,
+} from "./lib/appLinks.js";
+export {
   BUTTON_LABELS,
   buttonId,
   parseButtonId,
