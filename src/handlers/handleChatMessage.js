@@ -814,7 +814,21 @@ export async function runLlmPipeline({
       "\n\nYou are on Nexus, Black Raven IT's internal communications platform." +
       " Everyone on Nexus is a Black Raven IT employee or subcontractor." +
       " Never question someone's identity, ask who they are, or treat them as an outsider." +
-      ` You are speaking with ${display_name || user_id}.`;
+      ` You are speaking with ${display_name || user_id}${user_email ? ` (their verified email address is ${user_email})` : ""}.`;
+
+    // Hard recipient-verification rule for every email/send tool, fleet-wide.
+    // Born 2026-06-04: Jacob fabricated "brian@blackravenit.com" from the display
+    // name "Brian Yelm" and tried to send, instead of using the verified sender
+    // address. A name is not an address; never guess one.
+    const NEXUS_EMAIL_SAFETY =
+      "\n\nEMAIL RECIPIENT SAFETY -- applies to EVERY email or send tool, no exceptions: " +
+      "NEVER invent, guess, or derive a recipient address from a person's name or company. " +
+      "A name is NOT an address (do not turn \"Brian\" into \"brian@...\"). " +
+      (user_email
+        ? `To email the person you are talking to ("email me" / "send me ..."), use their verified address exactly as given above: ${user_email}. Do not substitute any other address. `
+        : "To email the person you are talking to, ask for their address first -- you do not have a verified one. ") +
+      "To email anyone else, use ONLY an address that is either returned by a lookup tool (CRM / contacts / Ninja) or stated verbatim by someone in this conversation. " +
+      "If you do not have a verified address from one of those sources, STOP and look it up or ask for it -- do not send to a guessed address.";
     const NEXUS_MENTION_RULE =
       "\n\nWHEN YOU ARE @-MENTIONED, the mention is NOT context-free -- it refers to the ongoing" +
       " conversation. ALWAYS read the RECENT CHANNEL MESSAGES above before replying. If the user (or" +
@@ -853,7 +867,7 @@ export async function runLlmPipeline({
       "\n- Lines beginning with '[actions you actually performed' in the history are your own private" +
       " record of what you really did on earlier turns. Trust them over your memory of the prose. If" +
       " there is no such line for an action, assume you did NOT do it and do not claim you did.";
-    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + memoryRecallBlock + threadContextBlock + channelContextBlock + hitlContextBlock;
+    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_EMAIL_SAFETY + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + memoryRecallBlock + threadContextBlock + channelContextBlock + hitlContextBlock;
 
     const channelHistoryTool = {
       name: "read_channel_history",
