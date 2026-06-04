@@ -50,6 +50,7 @@ export {
   inspectOutboundText,
 } from "./lib/sanitize.js";
 export { reportFleetError } from "./lib/fleetError.js";
+export { notifyEmailDown, BOT_HOME_CHANNELS } from "./lib/emailBackup.js";
 export { postApprovalCard, processButtonClick } from "./lib/hitl.js";
 export { postHitlCard, renderHitlCard } from "./lib/hitlCard.js";
 export {
