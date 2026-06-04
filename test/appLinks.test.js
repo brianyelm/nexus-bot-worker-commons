@@ -84,7 +84,7 @@ test("linkButtons returns [] for non-array", () => {
 test("xero builders produce expected urls and null on missing id", () => {
   assert.equal(
     xeroBankAccountUrl("abc-123"),
-    "https://go.xero.com/Bank/BankAccount.aspx?accountID=abc-123",
+    "https://go.xero.com/Bank/BankTransactions.aspx?accountId=abc-123",
   );
   assert.equal(
     xeroBillUrl("INV-9"),

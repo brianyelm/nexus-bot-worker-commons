@@ -123,13 +123,15 @@ function joinBase(base, path) {
 // ── Xero ──────────────────────────────────────────────────────────────────
 
 /**
- * Xero bank account page (lands on the Reconcile view for that account).
+ * Xero bank account transactions page (the reconcile/transactions list for that
+ * account). BankAccount.aspx?accountID=... 404s; the working deep link is
+ * BankTransactions.aspx?accountId=... (Brian, 2026-06-04).
  * @param {string} accountId - Xero AccountID GUID (present on bank transactions)
  * @returns {string|null}
  */
 export function xeroBankAccountUrl(accountId) {
   if (!accountId) return null;
-  return `https://go.xero.com/Bank/BankAccount.aspx?accountID=${encodeURIComponent(accountId)}`;
+  return `https://go.xero.com/Bank/BankTransactions.aspx?accountId=${encodeURIComponent(accountId)}`;
 }
 
 /**
