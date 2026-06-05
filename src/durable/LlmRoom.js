@@ -39,6 +39,14 @@ import { withProvenance } from "../lib/provenanceContext.js";
 const QUEUE_KEY = "llm_room_queue";
 const QUEUE_DEPTH_CAP = 20;
 
+// Recently-seen message ids, for exactly-once delivery. Per-(bot,conversation)
+// single-flight already serializes turns, but it does NOT dedup: if Nexus
+// retries a webhook (timeout/at-least-once delivery) the SAME message_id arrives
+// twice, both copies queue, and the bot answers the same message twice. We keep
+// a short rolling list of processed ids and drop a repeat at enqueue time.
+const RECENT_IDS_KEY = "llm_room_recent_ids";
+const RECENT_IDS_CAP = 50;
+
 /**
  * Base class. Each bot worker subclasses this and supplies its config:
  *
@@ -98,6 +106,26 @@ export class LlmRoomBase {
     }
 
     const queue = (await this.state.storage.get(QUEUE_KEY)) || [];
+
+    // Exactly-once: drop a duplicate delivery of the same message_id (already
+    // processed, or still sitting in the queue). Without this a retried webhook
+    // double-answers. Messages with no id (legacy callers) skip the check.
+    const msgId = job && job.message_id;
+    if (msgId) {
+      const recentIds = (await this.state.storage.get(RECENT_IDS_KEY)) || [];
+      const inQueue = queue.some((j) => j && j.message_id === msgId);
+      if (recentIds.includes(msgId) || inQueue) {
+        console.log(`[LlmRoom] duplicate message_id ${msgId} -- skipping (already ${inQueue ? "queued" : "processed"})`);
+        return new Response(JSON.stringify({ duplicate: true, skipped: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      recentIds.push(msgId);
+      if (recentIds.length > RECENT_IDS_CAP) recentIds.splice(0, recentIds.length - RECENT_IDS_CAP);
+      await this.state.storage.put(RECENT_IDS_KEY, recentIds);
+    }
+
     if (queue.length >= QUEUE_DEPTH_CAP) {
       console.warn(`[LlmRoom] queue full (${queue.length}) -- dropping job`);
       return new Response(JSON.stringify({ error: "Queue full" }), {

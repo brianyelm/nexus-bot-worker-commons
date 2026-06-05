@@ -867,7 +867,18 @@ export async function runLlmPipeline({
       "\n- Lines beginning with '[actions you actually performed' in the history are your own private" +
       " record of what you really did on earlier turns. Trust them over your memory of the prose. If" +
       " there is no such line for an action, assume you did NOT do it and do not claim you did.";
-    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_EMAIL_SAFETY + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + memoryRecallBlock + threadContextBlock + channelContextBlock + hitlContextBlock;
+    // Closing style. Work replies kept tacking on reflexive service-desk
+    // sign-offs ("Anything else?", "Let me know if you need anything"). They add
+    // nothing, read as filler, and (because they end in "?") even false-trip the
+    // auto-listen flag. Kill the empty closer; keep genuine clarifying questions.
+    const NEXUS_STYLE_CLOSE =
+      "\n\nCLOSING STYLE: when your reply fully answers or completes the request, stop there." +
+      " Do NOT tack on a filler sign-off question or offer just to seem helpful -- skip" +
+      " \"Anything else?\", \"Let me know if you need anything else\", \"Is there anything else I can" +
+      " help with?\", \"Want me to do anything else?\" and similar empty closers. A genuine clarifying" +
+      " question (you actually need a decision or detail to proceed) or a natural conversational beat" +
+      " is fine; a reflexive service-desk sign-off is not.";
+    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_EMAIL_SAFETY + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + NEXUS_STYLE_CLOSE + memoryRecallBlock + threadContextBlock + channelContextBlock + hitlContextBlock;
 
     const channelHistoryTool = {
       name: "read_channel_history",
@@ -2098,6 +2109,7 @@ export async function handleChatMessage(request, env, ctx, config) {
   // missing so legacy bots without DO wiring still work.
   const labeledUserText = `${display_name || user_id} (uid:${user_id}): ${annotateGifBody(userText)}`;
   const llmJob = {
+    message_id,
     user_id,
     user_email,
     display_name,
