@@ -55,6 +55,32 @@ const MAX_TOOLS_IN_BREADCRUMB = 10;
 const MAX_VALUE_LEN = 80;
 const MAX_TOOL_SUMMARY_LEN = 220;
 
+// Identifier-ish keys worth retaining from a tool RESULT (what came back), so a
+// later turn can reference it ("authorise it", "void that one"). Same spirit as
+// SAFE_INPUT_KEYS: ids/numbers/totals/status only, never body/content text.
+// Covers both our snake_case shapes and Xero/Ninja PascalCase fields.
+const RESULT_ID_KEYS = [
+  "id", "ID", "uuid",
+  "invoiceId", "invoice_id", "InvoiceID", "InvoiceNumber", "invoiceNumber",
+  "contactId", "contact_id", "ContactID",
+  "ticketId", "ticket_id", "ticketNumber",
+  "eventId", "event_id", "messageId", "message_id",
+  "orderId", "order_id", "number", "reference", "Reference",
+  "total", "Total", "amount", "AmountDue", "subtotal",
+  "status", "Status", "state", "count",
+  "name", "Name", "email", "url",
+];
+
+// Common envelope keys a handler wraps its real payload in. We look one level
+// into the first of these we find so {success:true, invoice:{...}} still yields
+// the invoice's id. Kept shallow on purpose (no deep walk, no bloat).
+const RESULT_WRAPPER_KEYS = [
+  "data", "result", "record", "invoice", "contact", "item",
+  "ticket", "event", "order", "message", "payment",
+];
+
+const MAX_RESULT_SUMMARY_LEN = 160;
+
 // Verbs that assert an action was completed. Used to detect a reply that
 // claims success. Past-tense / done-state phrasing only -- "I'll add" or
 // "want me to send" are intentions, not claims, and must not match.
@@ -109,6 +135,57 @@ export function summarizeToolCall(name, input, isError = false) {
 }
 
 /**
+ * Pull a compact set of identifier-ish values from a tool RESULT so a later
+ * turn can reference what the tool returned. Records only whitelisted id/number/
+ * total/status keys (top level plus one level into a common envelope), never
+ * body/content text. Returns "" when nothing useful is present.
+ *
+ * @param {string|object|Array} result - the tool_result content (string JSON,
+ *   parsed object, or multimodal array). Arrays/non-objects yield "".
+ * @returns {string} e.g. "InvoiceID: abc-123, Total: 4200, Status: DRAFT"
+ */
+export function summarizeToolResult(result) {
+  let obj = result;
+  if (typeof obj === "string") {
+    const s = obj.trim();
+    if (!s || (s[0] !== "{" && s[0] !== "[")) return "";
+    try { obj = JSON.parse(s); } catch { return ""; }
+  }
+  if (!obj || typeof obj !== "object" || Array.isArray(obj)) return "";
+
+  const collect = (src, parts) => {
+    if (!src || typeof src !== "object" || Array.isArray(src)) return;
+    for (const key of RESULT_ID_KEYS) {
+      if (parts.length >= 4) break;
+      if (src[key] === undefined || src[key] === null) continue;
+      if (typeof src[key] === "object") continue; // ids are scalars
+      let val = String(src[key]).replace(/\s+/g, " ").trim();
+      if (!val) continue;
+      if (val.length > MAX_VALUE_LEN) val = `${val.slice(0, MAX_VALUE_LEN)}...`;
+      if (parts.some((p) => p.startsWith(`${key}:`))) continue;
+      parts.push(`${key}: ${val}`);
+    }
+  };
+
+  const parts = [];
+  collect(obj, parts);
+  if (parts.length < 4) {
+    for (const wk of RESULT_WRAPPER_KEYS) {
+      if (parts.length >= 4) break;
+      const nested = obj[wk];
+      if (Array.isArray(nested)) collect(nested[0], parts);
+      else collect(nested, parts);
+    }
+  }
+  if (parts.length === 0) return "";
+  let summary = parts.join(", ");
+  if (summary.length > MAX_RESULT_SUMMARY_LEN) {
+    summary = `${summary.slice(0, MAX_RESULT_SUMMARY_LEN)}...`;
+  }
+  return summary;
+}
+
+/**
  * Build the action breadcrumb line for a turn, from the collected tool trace
  * plus any HITL action staged after the LLM returned.
  *
@@ -127,7 +204,15 @@ export function buildActionBreadcrumb(toolTrace, staged = null) {
   const trace = Array.isArray(toolTrace) ? toolTrace : [];
   for (const t of trace.slice(0, MAX_TOOLS_IN_BREADCRUMB)) {
     if (!t || !t.name) continue;
-    entries.push(summarizeToolCall(t.name, t.input, !!t.isError));
+    let entry = summarizeToolCall(t.name, t.input, !!t.isError);
+    // Append identifiers the tool RETURNED (e.g. the invoice id from a list/
+    // create) so a follow-up turn can act on "it" without re-querying. Only on
+    // success -- a failed call returned no usable referent.
+    if (!t.isError && t.result !== undefined) {
+      const resultIds = summarizeToolResult(t.result);
+      if (resultIds) entry += ` -> ${resultIds}`;
+    }
+    entries.push(entry);
   }
   if (trace.length > MAX_TOOLS_IN_BREADCRUMB) {
     entries.push(`(+${trace.length - MAX_TOOLS_IN_BREADCRUMB} more)`);

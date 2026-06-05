@@ -1125,8 +1125,8 @@ export async function runLlmPipeline({
       // Record each executed tool call so we can persist an action
       // breadcrumb into history (conversation memory) and detect replies
       // that claim success without a backing write tool.
-      onToolCall: (name, input, isError) => {
-        toolTrace.push({ name, input, isError });
+      onToolCall: (name, input, isError, result) => {
+        toolTrace.push({ name, input, isError, result });
       },
     };
 

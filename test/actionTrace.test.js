@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import {
   isReadonlyToolName,
   summarizeToolCall,
+  summarizeToolResult,
   buildActionBreadcrumb,
   looksLikeUnbackedClaim,
 } from "../src/lib/actionTrace.js";
@@ -88,6 +89,43 @@ test("buildActionBreadcrumb: caps long traces", () => {
   const trace = Array.from({ length: 15 }, (_, i) => ({ name: `tool_${i}`, input: {} }));
   const b = buildActionBreadcrumb(trace);
   assert.match(b, /\(\+5 more\)/);
+});
+
+test("summarizeToolResult: pulls top-level ids from a JSON string", () => {
+  const s = summarizeToolResult('{"InvoiceNumber":"INV-0042","Total":4200,"Status":"DRAFT"}');
+  assert.match(s, /InvoiceNumber: INV-0042/);
+  assert.match(s, /Total: 4200/);
+  assert.match(s, /Status: DRAFT/);
+});
+
+test("summarizeToolResult: looks one level into a wrapper envelope", () => {
+  const s = summarizeToolResult({ success: true, invoice: { InvoiceID: "abc-123", Status: "AUTHORISED" } });
+  assert.match(s, /InvoiceID: abc-123/);
+  assert.match(s, /Status: AUTHORISED/);
+});
+
+test("summarizeToolResult: ignores non-objects, arrays, and bodyless results", () => {
+  assert.equal(summarizeToolResult("just a sentence, not json"), "");
+  assert.equal(summarizeToolResult(["multimodal", "block"]), "");
+  assert.equal(summarizeToolResult(null), "");
+  assert.equal(summarizeToolResult('{"message":"sent"}').includes("message"), false);
+});
+
+test("buildActionBreadcrumb: appends returned identifiers on success", () => {
+  const b = buildActionBreadcrumb([
+    { name: "xero_list_invoices", input: { company: "Acme" }, isError: false,
+      result: '{"InvoiceNumber":"INV-0042","Total":4200}' },
+  ]);
+  assert.match(b, /xero_list_invoices\(company: Acme\) -> InvoiceNumber: INV-0042/);
+});
+
+test("buildActionBreadcrumb: does not append result ids on a failed call", () => {
+  const b = buildActionBreadcrumb([
+    { name: "xero_create_invoice", input: { company: "Acme" }, isError: true,
+      result: '{"id":"should-not-appear"}' },
+  ]);
+  assert.equal(b.includes("should-not-appear"), false);
+  assert.match(b, /\[FAILED\]/);
 });
 
 test("looksLikeUnbackedClaim: claims success with no tool call", () => {

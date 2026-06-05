@@ -196,7 +196,7 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
  *   the initial call, then increments per tool-loop iteration. Used by
  *   handleChatMessage to re-arm the Nexus typing indicator across long
  *   tool loops (the indicator has a 90s TTL on the Nexus DO).
- * @param {(name: string, input: object, isError: boolean) => void} [options.onToolCall]
+ * @param {(name: string, input: object, isError: boolean, result?: string|Array) => void} [options.onToolCall]
  *   Hook called once per executed tool_use block (after the handler runs).
  *   Used to accumulate an action breadcrumb for conversation memory. Errors
  *   in the hook are caught and never break the tool loop.
@@ -336,7 +336,12 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
       // must never break the tool loop.
       if (typeof options.onToolCall === "function") {
         try {
-          options.onToolCall(block.name, block.input, isError);
+          // Pass resultContent (4th arg) so callers can retain identifiers the
+          // tool RETURNED (invoice id, contact id, ticket number), not just the
+          // inputs. A follow-up turn ("authorise it") needs the id that came
+          // back, which the input-only breadcrumb dropped. Multimodal results
+          // (arrays) are passed as-is; the summarizer ignores non-objects.
+          options.onToolCall(block.name, block.input, isError, resultContent);
         } catch (err) {
           console.warn("[anthropic] onToolCall hook failed:", err.message);
         }
