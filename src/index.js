@@ -97,6 +97,7 @@ export {
   previewOf,
   BANG_REPORT_RULES,
 } from "./lib/embedCard.js";
+export { buildReportPrompt } from "./lib/reportPrompt.js";
 export {
   fmtDate,
   fmtTime,

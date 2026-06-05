@@ -143,13 +143,16 @@ const SECTION_DIVIDER = "\n\n---\n\n";
  * @param {string} opts.title          - sentence-case title, e.g. "Morning Briefing"
  * @param {string} [opts.subtitle]     - one-liner under the title (italic)
  * @param {Array<ReportSection>} opts.sections
+ * @param {string} [opts.body]         - pre-formatted markdown narrative (e.g. an LLM brief that
+ *                                       already carries its own numbered emoji+bold sections).
+ *                                       Renders verbatim; takes precedence over `sections`.
  * @param {string} [opts.footer]       - optional footer prose; "{botName} · {title}" is the default
  * @param {Date|number|string} [opts.generatedAt] - timestamp used in default footer; current time if omitted
  * @returns {string} markdown ready to pass to postToNexus
  *
  * @typedef {object} ReportSection
  * @property {string} [emoji]      - palette glyph (e.g. PALETTE.SCHEDULE)
- * @property {string} title        - section title; goes in `### **bold**`
+ * @property {string} title        - section title; renders as `emoji **N. bold**`
  * @property {number} [count]      - optional "(N)" suffix after the title
  * @property {string[]} [items]    - bullet list lines (already markdown-formatted)
  * @property {string} [lines]      - raw multi-line content; mutually exclusive with items
@@ -164,6 +167,7 @@ export function buildReport(opts = {}) {
     title,
     subtitle,
     sections = [],
+    body,
     footer,
     generatedAt,
   } = opts;
@@ -174,11 +178,18 @@ export function buildReport(opts = {}) {
   const out = [titleLine];
   if (subtitle) out.push(`*${subtitle}*`);
 
-  const renderedSections = (Array.isArray(sections) ? sections : [])
-    .map(renderSection)
-    .filter(Boolean);
+  // `body` is a pre-formatted markdown narrative (e.g. an LLM-generated brief that
+  // already carries its own numbered emoji+bold sections). When present it renders
+  // verbatim with no section wrapper, so we do not double-number it.
+  const hasBody = typeof body === "string" && body.trim().length > 0;
+  const renderedSections = hasBody
+    ? []
+    : (Array.isArray(sections) ? sections : []).map(renderSection).filter(Boolean);
 
-  if (renderedSections.length > 0) {
+  if (hasBody) {
+    out.push("");
+    out.push(body.trim());
+  } else if (renderedSections.length > 0) {
     out.push("");
     out.push(renderedSections.join(SECTION_DIVIDER));
   }
@@ -219,11 +230,12 @@ export function buildReport(opts = {}) {
   return report;
 }
 
-function renderSection(sec) {
+function renderSection(sec, index = 0) {
   if (!sec || typeof sec !== "object") return "";
   const headerEmoji = sec.emoji ? `${sec.emoji} ` : "";
   const countSuffix = typeof sec.count === "number" ? ` *(${sec.count})*` : "";
-  const heading = `### ${headerEmoji}**${sec.title || ""}**${countSuffix}`.trim();
+  // House style: numbered emoji+bold section headers, no markdown `###`.
+  const heading = `${headerEmoji}**${index + 1}. ${sec.title || ""}**${countSuffix}`.trim();
 
   let body;
   if (typeof sec.lines === "string" && sec.lines.length > 0) {

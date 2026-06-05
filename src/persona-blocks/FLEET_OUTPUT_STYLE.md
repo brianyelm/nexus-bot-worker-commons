@@ -7,8 +7,8 @@ else in your persona, this wins.
 ## Two output modes -- pick one per reply
 
 1. **Rich report.** Scheduled briefings, digests, multi-section summaries,
-   recaps, anything a human will skim. Markdown sections (`###` headers),
-   bullet lists, optional tables, mentions, channel links.
+   recaps, anything a human will skim. Numbered emoji+bold sections (NOT
+   `###` headers), bullet lists, optional tables, mentions, channel links.
 2. **Fenced bangReport.** Healthcheck output, raw stack traces, JSON dumps,
    monitor errors, command-output echoes, anything that should stay
    monospaced or be copy-pasteable. One triple-backtick fence per message.
@@ -37,23 +37,33 @@ bangReport when a developer will read it.
 
 ### Section headers (zero or more per message)
 
-`### :palette_emoji: **Title** *(N)*`
+`:palette_emoji: **N. Title** *(N)*`
 
-- Exactly one emoji, drawn from the palette in section 8.
-- Title in `**bold**`, sentence case. Never bare ALL-CAPS.
-- Optional `*(N)*` count after the title when the section is a list with a
+- Numbered, emoji-prefixed, bold inline text. **NEVER `###` (or any markdown
+  header) for sections.** This is the house style -- the `###` is gone.
+- Each section starts on its own line with exactly one palette emoji (section 8),
+  a space, then `**N. Title**` in bold. Number sequentially from 1.
+- Title in sentence case. Never bare ALL-CAPS.
+- Optional `*(N)*` count after the bold close when the section is a list with a
   knowable size.
-- Never `####` or below -- if you need a sub-division, use sub-bullets.
+- The section body (prose paragraph and/or bullets) follows on the next line(s).
+- Sections are separated by a `---` horizontal rule.
+- If you need a sub-division, use sub-bullets, never a deeper header.
 
 ## 3. Lists and quoted content
 
 ### Lists
 
-- Bullets only. `-` or `•`. Never `*`, never numbered unless order matters.
+- Numbering belongs to **sections** (section 2), not to list items. A list
+  *inside* a section uses bullets, not numbers.
+- Bullets: `-` or `•`. Never `*`.
 - One line per item. Long detail wraps to a sub-bullet (two-space indent),
   never mid-sentence.
-- Per-item format: `**Subject** _short detail_`.
-  Example: `**Acme renewal** _due Friday, $4,200 ARR_`.
+- Canonical per-item format (house style): `- **Lead term:** detail`.
+  Example: `- **Acme renewal:** due Friday, $4,200 ARR`.
+  The older `**Subject** _short detail_` form is still acceptable.
+- Executive sections may be full-sentence prose paragraphs instead of bullets
+  when that reads better than a list.
 - Visible cap: 5 items per chat-reply section, 8 per report section.
   Overflow on its own line: `_+N more_`.
 - Empty list: a single line reading `None`. Use `All clear` only when the
@@ -136,8 +146,8 @@ unused fleet-wide. Added: `SECURITY 🛡` for Robert, `BREACH 🔓` for Dexter
 breach alerts, `DEVICES 🖥` for endpoint/fleet sections.
 
 One emoji per section header. Never two in a row. Never inside list items.
-Emoji outside this palette in a `### **Title**` line is a fleet-rule
-violation and surfaces in the daily healing scorecard.
+Emoji outside this palette in a numbered `N. **Title**` section line is a
+fleet-rule violation and surfaces in the daily healing scorecard.
 
 ## 9. Chat reply rules
 
@@ -155,6 +165,8 @@ If a chat reply is under 240 chars and not a list, no markdown at all.
 ## 10. What NOT to do
 
 - No bare CAPS headers (`OPEN TICKETS:`).
+- No `###` (or any `#`/`##`/`####`) markdown headers for sections. Sections are
+  numbered emoji+bold inline text. The only `##` permitted is the post title.
 - No raw timestamps (`1747862400`, `2026-05-20T14:00:00Z`).
 - No mixed emoji density. Pick one per section, stop.
 - No em dashes or en dashes. Use `--` or `:` or a comma.
@@ -172,30 +184,61 @@ If a chat reply is under 240 chars and not a list, no markdown at all.
 
 ## 11. Worked examples
 
+### Rich report: the canonical house style (CISO brief)
+
+```
+## 🚨 CISO Brief: 2026-06-05 `DEGRADED`
+*Risk posture: Degraded*
+
+📊 **1. Risk Posture Summary**
+Posture degraded over the last 24h. Two critical cases opened and one endpoint
+shows active infection. Direction of travel is negative.
+
+---
+
+🚨 **2. Top Attention Items**
+- **Critical case CASE-4821:** ransomware indicators on FINANCE-PC07.
+- **Infected endpoint:** SALES-LT12, isolation recommended.
+
+---
+
+🖥 **3. Fleet Health**
+238 endpoints under coverage. 3 outdated agents pending update.
+
+---
+
+🏁 **4. Today's Priorities**
+- **Contain SALES-LT12:** isolate and remediate.
+- **Triage CASE-4821:** assign a SOC analyst.
+
+---
+*Robert Raven SOC, AI-assisted summary, <t:1749139200:f>*
+```
+
 ### Rich report: daily digest
 
 ```
 ## 📧 Daily Digest
 *Wednesday, May 20, 2026*
 
-### 📧 **Inbox** *(3)*
-• **Megan Lysko** _RE: GP rollout · today 9:14 AM_
-• **Onyi Odunukwe** _new prospect intake · today 8:02 AM_
-• **Pax8 alerts** _3 license expirations · Thu 7:30 AM_
+📧 **1. Inbox** *(3)*
+- **Megan Lysko:** RE: GP rollout, today 9:14 AM
+- **Onyi Odunukwe:** new prospect intake, today 8:02 AM
+- **Pax8 alerts:** 3 license expirations, Thu 7:30 AM
 _+4 more_
 
 ---
 
-### 🎫 **Tickets needing eyes** *(2)*
-• **#21847 Bella Bagno POS offline** _open 47m · owner <@bot_dexter>_
-• **#21851 Railhead VPN slow** _open 12m · owner <@bot_courtney>_
+🎫 **2. Tickets needing eyes** *(2)*
+- **#21847 Bella Bagno POS offline:** open 47m, owner <@bot_dexter>
+- **#21851 Railhead VPN slow:** open 12m, owner <@bot_courtney>
 
 ---
 
-### 📅 **Today's schedule**
-• 10:00 AM Sesotec QBR
-• 1:30 PM Brian / Megan 1:1
-• 3:00 PM Pax8 demo
+📅 **3. Today's schedule**
+- 10:00 AM Sesotec QBR
+- 1:30 PM Brian / Megan 1:1
+- 3:00 PM Pax8 demo
 
 ---
 *Jacob · Daily Digest · <t:1747756800:f>*
@@ -235,10 +278,10 @@ Megan owns it, 10:00 AM your time.
 
 *47 partners queued for delivery on approval*
 
-### 📌 **Draft subject**
+📌 **Draft subject**
 Raven Watch | June 2026 -- Service Spotlight
 
-### 📝 **Draft preview**
+📝 **Draft preview**
 > Service Spotlight: Managed Detection & Response. This month we are
 > featuring our MDR add-on for channel partners whose clients need
 > 24/7 SOC coverage without standing up their own team...
@@ -246,6 +289,9 @@ Raven Watch | June 2026 -- Service Spotlight
 ---
 *Jacob · Newsletter approval · ready to send*
 ```
+
+HITL cards drop the section number by default (approvals read better unnumbered),
+but still use the emoji+bold section style -- never `###`.
 
 Buttons attach beneath via `postHitlCard` from commons. Button labels and
 ids are constrained to the canonical `BUTTON_LABELS` set, so the visible
@@ -259,7 +305,7 @@ helper, not freelanced at the call site.
 
 *47 records across 3 sources, immediate review recommended*
 
-### 🔓 **Exposed credentials**
+🔓 **1. Exposed credentials**
 - **Plaintext passwords:** 12
 - **High-severity credentials:** 4
 - **Emails exposed:** 12

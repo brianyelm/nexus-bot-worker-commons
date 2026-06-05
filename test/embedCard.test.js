@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import {
   bangReport, bangAlert, buildReport, previewOf, safeEmbedTitle,
 } from "../src/lib/embedCard.js";
+import { buildReportPrompt } from "../src/lib/reportPrompt.js";
 import { PALETTE } from "../src/lib/format.js";
 
 test("bangReport wraps in code fence", () => {
@@ -39,9 +40,11 @@ test("buildReport basic shape", () => {
   });
   assert.match(out, /^## 📊 Device Sync/);
   assert.match(out, /\*Wednesday, May 20, 2026\*/);
-  assert.match(out, /### ✅ \*\*Endpoints\*\* \*\(238\)\*/);
+  // House style: numbered emoji+bold sections, NO ### headers.
+  assert.match(out, /✅ \*\*1\. Endpoints\*\* \*\(238\)\*/);
   assert.match(out, /• S1 active: 154/);
-  assert.match(out, /### ⚠️ \*\*Drift\*\*/);
+  assert.match(out, /⚠️ \*\*2\. Drift\*\*/);
+  assert.equal(out.includes("###"), false);
   // Footer with timestamp token
   assert.match(out, /<t:\d+:f>/);
 });
@@ -107,4 +110,45 @@ test("buildReport with raw lines", () => {
   });
   assert.match(out, /ID: 42/);
   assert.match(out, /Owner: <@brian>/);
+});
+
+test("buildReport body passthrough renders verbatim, not double-numbered", () => {
+  const narrative = "📊 **1. Risk Posture Summary**\nStable.\n\n🚨 **2. Top Items**\n- **A:** b";
+  const out = buildReport({
+    botName: "Robert",
+    emoji: PALETTE.ALERT,
+    title: "CISO Brief: 2026-06-05",
+    subtitle: "Risk posture: **Stable**",
+    body: narrative,
+    sections: [{ emoji: PALETTE.NOTES, title: "Ignored", lines: "should not render" }],
+  });
+  assert.match(out, /^## 🚨 CISO Brief: 2026-06-05/);
+  assert.match(out, /📊 \*\*1\. Risk Posture Summary\*\*/);
+  assert.match(out, /🚨 \*\*2\. Top Items\*\*/);
+  // sections are ignored when body is present
+  assert.equal(out.includes("should not render"), false);
+  assert.equal(out.includes("###"), false);
+});
+
+test("buildReportPrompt embeds numbered emoji+bold headers and rules", () => {
+  const { system, user } = buildReportPrompt({
+    role: "CISO-level SOC analyst",
+    botName: "Robert",
+    period: "the past 24 hours",
+    sections: [
+      { emoji: PALETTE.METRICS, title: "Risk Posture Summary", kind: "prose", hint: "direction of travel" },
+      { emoji: PALETTE.ALERT, title: "Top Attention Items", kind: "bullets" },
+    ],
+    data: '{"newThreats":3}',
+    caveats: ["onlineAgents is a heartbeat count, not coverage"],
+  });
+  assert.match(system, /Robert/);
+  assert.match(system, /em dashes/);
+  assert.match(user, /📊 \*\*1\. Risk Posture Summary\*\*/);
+  assert.match(user, /🚨 \*\*2\. Top Attention Items\*\*/);
+  assert.match(user, /direction of travel/);
+  assert.match(user, /Lead term/);
+  assert.match(user, /newThreats/);
+  assert.match(user, /heartbeat count/);
+  assert.match(user, /Do not use `#`, `##`, or `###`/);
 });

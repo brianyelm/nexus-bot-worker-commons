@@ -197,7 +197,7 @@ export async function postHitlCard(env, params = {}) {
  * @returns {string}
  */
 export function renderHitlCard({
-  bot, kind, title, titleEmoji, subtitle, severity, sections = [],
+  bot, kind, title, titleEmoji, subtitle, severity, sections = [], numbered = false,
 }) {
   const titlePrefix = titleEmoji ? `${titleEmoji} ` : "";
   const severityPill = severity ? ` \`${String(severity).toUpperCase()}\`` : "";
@@ -207,7 +207,7 @@ export function renderHitlCard({
   }
 
   const renderedSections = sections
-    .map(renderSection)
+    .map((sec, i) => renderSection(sec, i, numbered))
     .filter(Boolean);
   if (renderedSections.length > 0) {
     out.push("");
@@ -232,20 +232,28 @@ export function renderHitlCard({
 // ─── Internal helpers ────────────────────────────────────────────────────────
 
 /**
- * Render a single ### section. Accepts mutually-exclusive shapes:
+ * Render a single section header (house style: emoji+bold, no markdown `###`).
+ * Numbering is off by default for HITL cards; pass `numbered=true` (or set it
+ * card-wide on renderHitlCard) to get "1. / 2. / ..." prefixes, and
+ * `sec.number === false` to opt an individual section out.
+ *
+ * Accepts mutually-exclusive body shapes:
  *   - lines:  raw multi-line content
  *   - items:  bullet list
  *   - kv:     {key: value} key/value pairs
  *   - quote:  {from, subject, body, truncatedAt?} → blockquote
  *
  * @param {object} sec
+ * @param {number} [index=0]
+ * @param {boolean} [numbered=false]
  * @returns {string|null}
  */
-function renderSection(sec) {
+function renderSection(sec, index = 0, numbered = false) {
   if (!sec || typeof sec !== "object") return null;
   const emoji = sec.emoji ? `${sec.emoji} ` : "";
   const count = typeof sec.count === "number" ? ` *(${sec.count})*` : "";
-  const header = `### ${emoji}**${sec.title || ""}**${count}`;
+  const numPrefix = numbered && sec.number !== false ? `${index + 1}. ` : "";
+  const header = `${emoji}**${numPrefix}${sec.title || ""}**${count}`;
 
   if (sec.quote && typeof sec.quote === "object") {
     return `${header}\n${_renderQuote(sec.quote)}`;

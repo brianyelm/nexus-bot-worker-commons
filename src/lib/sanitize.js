@@ -86,9 +86,10 @@ export function detectFreelanceEmoji(text) {
   const palette = _loadPaletteSet();
   const lines = text.split(/\r?\n/);
   for (const line of lines) {
-    // Looking for "### " optionally with `**Title**` after; emoji typically
-    // sits between the `###` and the title text.
-    if (!/^#{2,3}\s/.test(line)) continue;
+    // Match a section header line. Two shapes:
+    //   - legacy / HITL `## ` or `### ` headers (emoji sits before the title)
+    //   - house-style numbered sections: "<emoji> **1. Title**" (no markdown header)
+    if (!/^#{2,3}\s/.test(line) && !/^\S+\s+\*\*\d+\.\s/.test(line)) continue;
     const matches = line.match(EMOJI_RE);
     if (!matches) continue;
     for (const m of matches) {
@@ -101,7 +102,7 @@ export function detectFreelanceEmoji(text) {
 /**
  * True if a line that looks like a bot-authored header is written as
  * bare ALL-CAPS (e.g. "OPEN TICKETS:"). The style guide section 2 forbids
- * this -- use `###` markdown headers instead.
+ * this -- use a numbered emoji+bold section line ("<emoji> **1. Title**") instead.
  *
  * Heuristic: a standalone line that is 3+ words, all-uppercase with at most
  * one trailing colon, and not a fenced-block marker.

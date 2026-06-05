@@ -99,10 +99,11 @@ export async function postApprovalCard(env, params, options = {}) {
     const descText = summary || action.description || "No description provided.";
 
     const cardLines = [
-      `**SOC Response Action -- Pending Approval** [${riskLabel}]`,
-      `Operation: \`${opLabel}\``,
-      `Requested by: ${requesterUserId || "unknown"}`,
-      `Description: ${descText}`,
+      `## SOC Response Action -- Pending Approval \`${riskLabel}\``,
+      `*Operation: \`${opLabel}\`*`,
+      ``,
+      `- **Requested by:** ${requesterUserId || "unknown"}`,
+      `- **Description:** ${descText}`,
     ];
     if (action.params) {
       cardLines.push(`Parameters:\n\`\`\`json\n${JSON.stringify(action.params, null, 2).slice(0, 400)}\n\`\`\``);
@@ -167,12 +168,13 @@ export async function postApprovalCard(env, params, options = {}) {
   const paramsSnippet = JSON.stringify(actionParams, null, 2).slice(0, 600);
 
   const cardBody = [
-    `**SOC Action Pending Approval** [${riskLabel}]`,
-    `Operation: \`${operation}\``,
-    `Description: ${description}`,
-    `Reversible: ${reversibleLabel}`,
+    `## SOC Action Pending Approval \`${riskLabel}\``,
+    ``,
+    `- **Operation:** \`${operation}\``,
+    `- **Description:** ${description}`,
+    `- **Reversible:** ${reversibleLabel}`,
+    `- **Incident ID:** \`${incidentId}\``,
     `Parameters:\n\`\`\`json\n${paramsSnippet}\n\`\`\``,
-    `Incident ID: \`${incidentId}\``,
     ``,
     `Click Approve or Deny below.`,
   ].join("\n");

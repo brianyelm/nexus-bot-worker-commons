@@ -37,8 +37,24 @@ test("sections with items render as bullet list", () => {
       items: ["one", "two", "three"],
     }],
   });
-  assert.match(md, /### 🛡 \*\*Posture\*\* \*\(3\)\*/);
+  // House style: emoji+bold section header, no ###, no number by default for HITL.
+  assert.match(md, /🛡 \*\*Posture\*\* \*\(3\)\*/);
+  assert.equal(md.includes("###"), false);
   assert.match(md, /- one\n- two\n- three/);
+});
+
+test("numbered=true prefixes HITL sections with N.", () => {
+  const md = renderHitlCard({
+    bot: "robert", kind: "incident",
+    title: "Daily Brief",
+    numbered: true,
+    sections: [
+      { emoji: "🛡", title: "Posture", items: ["ok"] },
+      { emoji: "🚨", title: "Cases", items: ["one"] },
+    ],
+  });
+  assert.match(md, /🛡 \*\*1\. Posture\*\*/);
+  assert.match(md, /🚨 \*\*2\. Cases\*\*/);
 });
 
 test("sections with kv render as labeled bullets", () => {
@@ -93,7 +109,7 @@ test("empty items list renders 'None'", () => {
     title: "Onboarding",
     sections: [{ title: "Outstanding", items: [] }],
   });
-  assert.match(md, /### \*\*Outstanding\*\*\nNone/);
+  assert.match(md, /\*\*Outstanding\*\*\nNone/);
 });
 
 test("items overflow appends '_+N more_'", () => {
