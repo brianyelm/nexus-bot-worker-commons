@@ -39,6 +39,7 @@ export { resolveEntity, getEntityContext, persistTurnPair, assertFact } from "./
 export { buildContactRecall } from "./lib/memoryRecall.js";
 export { senderTrust } from "./lib/mailTrust.js";
 export { isAutomaticReply } from "./lib/mailSafety.js";
+export { stageExternalReply, handleExternalReplyGate } from "./lib/externalReplyGate.js";
 export { looksLikeIncomingPayment } from "./lib/incomingPayment.js";
 export { memoryHmacHex, buildMemoryAuthHeaders } from "./lib/memoryAuth.js";
 export { postToNexus, uploadBotAttachment, attachButtons, attachModals, editNexusMessage, fetchChannelMessages, fetchThreadMessages, sendNexusHeartbeat, sendTyping, pingBotPresence } from "./lib/nexus.js";
