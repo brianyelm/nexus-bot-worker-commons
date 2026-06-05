@@ -128,11 +128,13 @@ test("ninja builders require NINJA_BASE_URL", () => {
 
 // ── CRM builder ──────────────────────────────────────────────────────────────
 
-test("crmRecordUrl builds for known kinds and null otherwise", () => {
+test("crmRecordUrl builds hash deep-links (kind -> CRM page) and null otherwise", () => {
   const env = { CRM_APP_BASE: "https://sales.blackravenit.com" };
-  assert.equal(crmRecordUrl(env, "opportunities", "op_1"), "https://sales.blackravenit.com/opportunities/op_1");
-  assert.equal(crmRecordUrl(env, "clients", "c_1"), "https://sales.blackravenit.com/clients/c_1");
-  assert.equal(crmRecordUrl(env, "prospects", "p_1"), "https://sales.blackravenit.com/prospects/p_1");
+  // The SPA routes by hash, and a prospect lives on the "leads" page.
+  assert.equal(crmRecordUrl(env, "opportunities", "op_1"), "https://sales.blackravenit.com/#opportunities/op_1");
+  assert.equal(crmRecordUrl(env, "clients", "c_1"), "https://sales.blackravenit.com/#clients/c_1");
+  assert.equal(crmRecordUrl(env, "prospects", "p_1"), "https://sales.blackravenit.com/#leads/p_1");
+  assert.equal(crmRecordUrl(env, "partners", "pa_1"), "https://sales.blackravenit.com/#partners/pa_1");
   assert.equal(crmRecordUrl(env, "widgets", "w_1"), null);
   assert.equal(crmRecordUrl({}, "clients", "c_1"), null);
 });

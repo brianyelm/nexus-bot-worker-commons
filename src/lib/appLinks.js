@@ -202,19 +202,33 @@ export function ninjaTicketUrl(env, ticketId) {
 
 // ── CRM (env.CRM_APP_BASE = https://sales.blackravenit.com) ──────────────────
 
-const CRM_KINDS = new Set(["opportunities", "clients", "prospects", "contacts"]);
+// The CRM SPA routes by URL HASH ("#<page>/<id>"), not path, and its page names
+// differ from the bot-facing record "kind" (a prospect lives on the "leads"
+// page). A path-style link (/prospects/<id>) loads the SPA with an empty hash
+// and falls straight through to the dashboard -- which is exactly the "Open in
+// CRM goes to the dashboard" bug Brian hit. Map kind -> page and emit a hash
+// deep-link that the SPA opens directly on the record.
+const CRM_PAGE_BY_KIND = {
+  prospects: "leads",
+  leads: "leads",
+  clients: "clients",
+  opportunities: "opportunities",
+  partners: "partners",
+};
 
 /**
- * Black Raven CRM record page.
+ * Black Raven CRM record deep-link (hash route the SPA opens directly).
  * @param {object} env
- * @param {string} kind - "opportunities" | "clients" | "prospects" | "contacts"
+ * @param {string} kind - "prospects" | "clients" | "opportunities" | "partners"
  * @param {string|number} id
- * @returns {string|null}
+ * @returns {string|null} e.g. https://sales.blackravenit.com/#leads/<id>
  */
 export function crmRecordUrl(env, kind, id) {
   if (!env?.CRM_APP_BASE || !kind || id == null || id === "") return null;
-  if (!CRM_KINDS.has(kind)) return null;
-  return joinBase(env.CRM_APP_BASE, `${kind}/${encodeURIComponent(id)}`);
+  const page = CRM_PAGE_BY_KIND[kind];
+  if (!page) return null;
+  const base = String(env.CRM_APP_BASE).replace(/\/+$/, "");
+  return `${base}/#${page}/${encodeURIComponent(id)}`;
 }
 
 // ── DocuSign (env.DOCUSIGN_APP_BASE, default app.docusign.com) ───────────────
