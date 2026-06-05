@@ -152,6 +152,37 @@ export function phoenixToday(now = new Date()) {
   };
 }
 
+// Phoenix is UTC-7 year-round (no DST), so a fixed offset is exact.
+const AZ_OFFSET_MS = 7 * 60 * 60 * 1000;
+
+/**
+ * Canonical "today" as YYYY-MM-DD in America/Phoenix. Use this everywhere a bot
+ * needs the current local date for a tool answer, dedup key, or invoice stamp.
+ *
+ * Never use `new Date().toISOString().slice(0, 10)` for "today" -- CF Workers
+ * run in UTC, so after ~5 PM AZ that returns TOMORROW. This is the regression
+ * that keeps reappearing; route through here instead.
+ *
+ * @param {Date} [now] - instant to evaluate (defaults to current time)
+ * @returns {string} "2026-06-05"
+ */
+export function todayIso(now = new Date()) {
+  return phoenixToday(now).iso;
+}
+
+/**
+ * Current weekday index in America/Phoenix: 0=Sunday ... 6=Saturday.
+ * AZ-local, matching JS getDay() semantics but immune to the UTC rollover that
+ * makes a bare `new Date().getDay()` / `getUTCDay()` report the wrong day in
+ * the AZ evening.
+ *
+ * @param {Date} [now] - instant to evaluate (defaults to current time)
+ * @returns {number} 0..6
+ */
+export function phoenixWeekdayIndex(now = new Date()) {
+  return new Date(now.getTime() - AZ_OFFSET_MS).getUTCDay();
+}
+
 // ─── NUMBERS / MONEY ────────────────────────────────────────────────────────
 
 /**
