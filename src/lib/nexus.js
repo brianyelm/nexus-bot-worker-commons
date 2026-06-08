@@ -412,6 +412,52 @@ export async function attachButtons(env, messageId, buttons, options = {}) {
 }
 
 /**
+ * Disable action buttons on a Nexus message the bot authored. Disabled buttons
+ * render greyed + non-clickable and the click route rejects stale clicks. Link
+ * buttons (url set) are never disabled server-side, so an "Open in CRM" deep
+ * link stays usable after the card is settled.
+ *
+ * Use this to lock a HITL card's stale buttons once its outcome is decided,
+ * e.g. disabling "Decline" after a cadence step was approved and sent.
+ *
+ * @param {object} env
+ * @param {string} messageId - Nexus message id returned by postToNexus
+ * @param {object} target - one of: { all: true } or { buttonIds: string[] }
+ * @param {boolean} [target.all] - disable every non-link action button
+ * @param {string[]} [target.buttonIds] - disable only these button_id strings
+ * @param {object} [options]
+ * @param {string} [options.nexusKeyEnvVar] - env var name holding the API key
+ * @returns {Promise<Array|null>} refreshed button rows or null on error
+ */
+export async function disableMessageButtons(env, messageId, target = {}, options = {}) {
+  const apiKey = resolveNexusKey(env, options);
+  if (!apiKey || !env.NEXUS_BASE_URL) return null;
+
+  const payload = target.all
+    ? { all: true }
+    : { button_ids: Array.isArray(target.buttonIds) ? target.buttonIds : [] };
+  if (!payload.all && payload.button_ids.length === 0) return null;
+
+  try {
+    const result = await _bearerPostWithRetry(
+      `${env.NEXUS_BASE_URL}/api/bot/messages/${messageId}/buttons/disable`,
+      payload,
+      apiKey,
+    );
+    return result?.data || null;
+  } catch (err) {
+    console.warn(`[nexus] disableMessageButtons(${messageId}) failed:`, err.message);
+    _getReportFleetError().then(fn => fn(env, {
+      bot: deriveBotName(env, options),
+      op: "disableMessageButtons",
+      msg: err.message,
+      ctx: { messageId, target: payload.all ? "all" : payload.button_ids },
+    }, options)).catch(() => {});
+    return null;
+  }
+}
+
+/**
  * Attach message-modal triggers to a Nexus message.
  * Uses POST /api/bot/messages/:id/modals (Bearer auth, same as attachButtons).
  *
