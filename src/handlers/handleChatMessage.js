@@ -867,6 +867,19 @@ export async function runLlmPipeline({
       "\n- Lines beginning with '[actions you actually performed' in the history are your own private" +
       " record of what you really did on earlier turns. Trust them over your memory of the prose. If" +
       " there is no such line for an action, assume you did NOT do it and do not claim you did.";
+    // Infra grounding. Bots have no view of their own plumbing, so when asked
+    // "why did X happen" they confabulate a plausible-but-wrong cause (e.g. Moxie
+    // blaming a config var for an analytics number it can't actually see), which
+    // sends humans chasing red herrings. Make "I can't see that layer" the
+    // required answer instead of a fabricated diagnosis.
+    const NEXUS_INFRA_GROUNDING =
+      "\n\nINFRA GROUNDING (you cannot see your own plumbing): You have NO visibility into your own" +
+      " source code, infrastructure, secrets, environment variables, bindings, cron schedules, or the" +
+      " internal reason a tool or job produced a particular output. If asked WHY you said or did" +
+      " something at that layer (e.g. \"why does this show zero\", \"why did that job fail\", \"which" +
+      " setting controls this\"), do NOT invent a cause, name a config/variable, or diagnose from" +
+      " memory -- those guesses are usually wrong and waste people's time on red herrings. Say plainly" +
+      " that you cannot see that layer, and flag it for Brian or Hank to check the code/logs.";
     // Closing style. Work replies kept tacking on reflexive service-desk
     // sign-offs ("Anything else?", "Let me know if you need anything"). They add
     // nothing, read as filler, and (because they end in "?") even false-trip the
@@ -878,7 +891,7 @@ export async function runLlmPipeline({
       " help with?\", \"Want me to do anything else?\" and similar empty closers. A genuine clarifying" +
       " question (you actually need a decision or detail to proceed) or a natural conversational beat" +
       " is fine; a reflexive service-desk sign-off is not.";
-    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_EMAIL_SAFETY + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + NEXUS_STYLE_CLOSE + memoryRecallBlock + threadContextBlock + channelContextBlock + hitlContextBlock;
+    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_EMAIL_SAFETY + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + NEXUS_INFRA_GROUNDING + NEXUS_STYLE_CLOSE + memoryRecallBlock + threadContextBlock + channelContextBlock + hitlContextBlock;
 
     const channelHistoryTool = {
       name: "read_channel_history",
