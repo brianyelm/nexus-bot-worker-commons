@@ -182,9 +182,14 @@ export function buildReport(opts = {}) {
   // already carries its own numbered emoji+bold sections). When present it renders
   // verbatim with no section wrapper, so we do not double-number it.
   const hasBody = typeof body === "string" && body.trim().length > 0;
-  const renderedSections = hasBody
-    ? []
-    : (Array.isArray(sections) ? sections : []).map(renderSection).filter(Boolean);
+  const sectionList = hasBody ? [] : (Array.isArray(sections) ? sections : []);
+  // Numbering only earns its keep with 2+ sections. A lone section gets a clean
+  // emoji+bold header with no "1." prefix, so single-item cards stop reading like
+  // an auto-generated cron report.
+  const numbered = sectionList.length > 1;
+  const renderedSections = sectionList
+    .map((sec, i) => renderSection(sec, i, numbered))
+    .filter(Boolean);
 
   if (hasBody) {
     out.push("");
@@ -230,12 +235,14 @@ export function buildReport(opts = {}) {
   return report;
 }
 
-function renderSection(sec, index = 0) {
+function renderSection(sec, index = 0, numbered = true) {
   if (!sec || typeof sec !== "object") return "";
   const headerEmoji = sec.emoji ? `${sec.emoji} ` : "";
   const countSuffix = typeof sec.count === "number" ? ` *(${sec.count})*` : "";
-  // House style: numbered emoji+bold section headers, no markdown `###`.
-  const heading = `${headerEmoji}**${index + 1}. ${sec.title || ""}**${countSuffix}`.trim();
+  // House style: emoji+bold section headers, no markdown `###`. The numeric
+  // prefix is added only when the card has multiple sections (see buildReport).
+  const numPrefix = numbered ? `${index + 1}. ` : "";
+  const heading = `${headerEmoji}**${numPrefix}${sec.title || ""}**${countSuffix}`.trim();
 
   let body;
   if (typeof sec.lines === "string" && sec.lines.length > 0) {

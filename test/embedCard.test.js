@@ -58,6 +58,27 @@ test("buildReport empty section uses fallback label", () => {
   assert.match(out, /\(none\)/);
 });
 
+test("buildReport single section is NOT numbered", () => {
+  const out = buildReport({
+    botName: "Courtney",
+    title: "Daily Motivation",
+    sections: [{ emoji: PALETTE.NOTES, title: "Today", lines: "Keep going." }],
+  });
+  // A lone section gets a clean header, no "1." prefix.
+  assert.match(out, /\*\*Today\*\*/);
+  assert.equal(/\*\*1\. Today\*\*/.test(out), false);
+});
+
+test("buildReportPrompt single section is NOT numbered", () => {
+  const { user } = buildReportPrompt({
+    botName: "Wren",
+    period: "today",
+    sections: [{ emoji: PALETTE.SCHEDULE, title: "Agenda", kind: "prose" }],
+  });
+  assert.match(user, /\*\*Agenda\*\*/);
+  assert.equal(/\*\*1\. Agenda\*\*/.test(user), false);
+});
+
 test("buildReport overflow", () => {
   const out = buildReport({
     botName: "Wren",

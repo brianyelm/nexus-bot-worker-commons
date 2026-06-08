@@ -54,17 +54,21 @@ export function buildReportPrompt(opts = {}) {
     caveats = [],
   } = opts;
 
-  const specLines = (Array.isArray(sections) ? sections : [])
-    .filter(sec => sec && typeof sec === "object" && sec.title)
-    .map((sec, i) => {
-      const emoji = sec.emoji ? `${sec.emoji} ` : "";
-      const kind = sec.kind === "bullets" ? "bullets" : "prose";
-      const shape = kind === "bullets"
-        ? 'bullets of the form "- **Lead term:** detail"'
-        : "1-3 full sentences in an executive voice";
-      const hint = sec.hint ? ` -- ${sec.hint}` : "";
-      return `${emoji}**${i + 1}. ${sec.title}**\n(${shape}${hint})`;
-    });
+  const cleanSections = (Array.isArray(sections) ? sections : [])
+    .filter(sec => sec && typeof sec === "object" && sec.title);
+  // Number the headers only when there are 2+ sections; a single section reads
+  // as a plain header, matching buildReport's single-section behavior.
+  const numbered = cleanSections.length > 1;
+  const specLines = cleanSections.map((sec, i) => {
+    const emoji = sec.emoji ? `${sec.emoji} ` : "";
+    const kind = sec.kind === "bullets" ? "bullets" : "prose";
+    const shape = kind === "bullets"
+      ? 'bullets of the form "- **Lead term:** detail"'
+      : "1-3 full sentences in an executive voice";
+    const hint = sec.hint ? ` -- ${sec.hint}` : "";
+    const numPrefix = numbered ? `${i + 1}. ` : "";
+    return `${emoji}**${numPrefix}${sec.title}**\n(${shape}${hint})`;
+  });
 
   const caveatBlock = caveats.length
     ? `\n\nData caveats (respect these strictly):\n${caveats.map(c => `- ${c}`).join("\n")}`
