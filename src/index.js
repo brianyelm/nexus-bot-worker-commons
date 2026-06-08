@@ -45,6 +45,7 @@ export { memoryHmacHex, buildMemoryAuthHeaders } from "./lib/memoryAuth.js";
 export { postToNexus, uploadBotAttachment, attachButtons, disableMessageButtons, attachModals, editNexusMessage, fetchChannelMessages, fetchThreadMessages, sendNexusHeartbeat, sendTyping, pingBotPresence } from "./lib/nexus.js";
 export { captureQa, captureCronRun, buildQaEntry, isNoopCronResult } from "./lib/qaCapture.js";
 export { withProvenance, getProvenanceContext } from "./lib/provenanceContext.js";
+export { crmReadTools, crmReadHandlers } from "./lib/crmCodes.js";
 export {
   scrubFleetDashes,
   detectEmDashLeak,
