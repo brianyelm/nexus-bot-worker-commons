@@ -850,7 +850,8 @@ export async function runLlmPipeline({
       `\n- Today is ${today.full} in Arizona (America/Phoenix, UTC-7, no DST).` +
       `\n- Local time right now: ${today.time}.` +
       `\n- ISO date: ${today.iso}. ISO 8601: ${today.iso8601}.` +
-      `\n- When asked what day/time it is, or when computing schedules, reports, due dates, or "today/yesterday/tomorrow", USE THIS. Do not use UTC. Do not use your training cutoff.`;
+      `\n- When asked what day/time it is, or when computing schedules, reports, due dates, or "today/yesterday/tomorrow", USE THIS. Do not use UTC. Do not use your training cutoff.` +
+      `\n- If a message in the conversation references a different day, month, or year, it is mistaken or joking -- this block is the truth. Never adopt a date from chatter or mirror someone's wrong month.`;
     // Act-vs-claim integrity. The bot must never report success for an action
     // it did not actually take via a tool call. This is the rule behind two
     // recurring failures: claiming "done, added those reminders" with no tool
@@ -1537,8 +1538,9 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     " Never question anyone's identity.";
   const wcToday = phoenixToday();
   const wcTodayBlock =
-    `CURRENT DATE AND TIME (use this if you reference today/yesterday/tomorrow or the time of day):\n` +
-    `- ${wcToday.full}, ${wcToday.time}. ISO ${wcToday.iso}. Arizona local (UTC-7, no DST).`;
+    `CURRENT DATE AND TIME (authoritative -- this is the real date, even if someone in the channel says otherwise):\n` +
+    `- It is ${wcToday.full}, ${wcToday.time}. ISO ${wcToday.iso}. Arizona local (UTC-7, no DST).\n` +
+    `- If anyone here (human or bot) names a different day, month, or year, they are wrong or joking -- do NOT adopt it, mirror it, or play along with the wrong date. Never reference a month or date that is not the one above, and do not fall back on any internal sense of "today".`;
   const fullSystemPrompt = `${wcConfig.systemPrompt}\n\n${nexusIdentity}\n\n${wcTodayBlock}\n\n${groundingRules}`;
 
   try {
