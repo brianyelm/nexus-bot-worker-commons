@@ -38,10 +38,12 @@ export function isOfficeMime(mime) {
 
 /**
  * Inflate a raw DEFLATE byte range (ZIP method 8) via DecompressionStream.
+ * Exported so other readers (e.g. email attachment ZIP/DMARC handling in
+ * emailAttachments.js) can reuse the same inflate path.
  * @param {Uint8Array} bytes
  * @returns {Promise<Uint8Array>}
  */
-async function inflateRaw(bytes) {
+export async function inflateRaw(bytes) {
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
@@ -70,7 +72,7 @@ function findEocd(view) {
  * @param {ArrayBuffer} buf
  * @returns {Map<string, { method: number, raw: Uint8Array }>}
  */
-function readZipEntries(buf) {
+export function readZipEntries(buf) {
   const view = new DataView(buf);
   const bytes = new Uint8Array(buf);
   const eocd = findEocd(view);

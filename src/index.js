@@ -131,6 +131,7 @@ export {
   PALETTE,
 } from "./lib/format.js";
 export { buildAttachmentContentBlocks } from "./lib/attachments.js";
+export { buildEmailAttachmentBlocks } from "./lib/emailAttachments.js";
 export {
   postHmacSigned,
   makeJoinCommand,
