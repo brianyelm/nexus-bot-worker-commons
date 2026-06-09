@@ -40,10 +40,12 @@ test("buildReport basic shape", () => {
   });
   assert.match(out, /^## 📊 Device Sync/);
   assert.match(out, /\*Wednesday, May 20, 2026\*/);
-  // House style: numbered emoji+bold sections, NO ### headers.
-  assert.match(out, /✅ \*\*1\. Endpoints\*\* \*\(238\)\*/);
+  // House style: bulleted emoji+bold sections (emoji is the bullet, no number), NO ### headers.
+  assert.match(out, /✅ \*\*Endpoints\*\* \*\(238\)\*/);
   assert.match(out, /• S1 active: 154/);
-  assert.match(out, /⚠️ \*\*2\. Drift\*\*/);
+  assert.match(out, /⚠️ \*\*Drift\*\*/);
+  // No numeric section prefix anywhere.
+  assert.equal(/\*\*\d+\. /.test(out), false);
   assert.equal(out.includes("###"), false);
   // Footer with timestamp token
   assert.match(out, /<t:\d+:f>/);
@@ -151,7 +153,21 @@ test("buildReport body passthrough renders verbatim, not double-numbered", () =>
   assert.equal(out.includes("###"), false);
 });
 
-test("buildReportPrompt embeds numbered emoji+bold headers and rules", () => {
+test("buildReport emoji-less multi-section headers get a • bullet, not a number", () => {
+  const out = buildReport({
+    botName: "Wren",
+    title: "Recap",
+    sections: [
+      { title: "First", lines: "a" },
+      { title: "Second", lines: "b" },
+    ],
+  });
+  assert.match(out, /\*\*• First\*\*/);
+  assert.match(out, /\*\*• Second\*\*/);
+  assert.equal(/\*\*\d+\. /.test(out), false);
+});
+
+test("buildReportPrompt embeds bulleted emoji+bold headers and rules", () => {
   const { system, user } = buildReportPrompt({
     role: "CISO-level SOC analyst",
     botName: "Robert",
@@ -165,8 +181,10 @@ test("buildReportPrompt embeds numbered emoji+bold headers and rules", () => {
   });
   assert.match(system, /Robert/);
   assert.match(system, /em dashes/);
-  assert.match(user, /📊 \*\*1\. Risk Posture Summary\*\*/);
-  assert.match(user, /🚨 \*\*2\. Top Attention Items\*\*/);
+  assert.match(user, /📊 \*\*Risk Posture Summary\*\*/);
+  assert.match(user, /🚨 \*\*Top Attention Items\*\*/);
+  // Emoji-led headers carry no numeric prefix.
+  assert.equal(/\*\*\d+\. /.test(user), false);
   assert.match(user, /direction of travel/);
   assert.match(user, /Lead term/);
   assert.match(user, /newThreats/);

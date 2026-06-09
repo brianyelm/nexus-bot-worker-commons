@@ -144,7 +144,7 @@ const SECTION_DIVIDER = "\n\n---\n\n";
  * @param {string} [opts.subtitle]     - one-liner under the title (italic)
  * @param {Array<ReportSection>} opts.sections
  * @param {string} [opts.body]         - pre-formatted markdown narrative (e.g. an LLM brief that
- *                                       already carries its own numbered emoji+bold sections).
+ *                                       already carries its own emoji+bold sections).
  *                                       Renders verbatim; takes precedence over `sections`.
  * @param {string} [opts.footer]       - optional footer prose; "{botName} · {title}" is the default
  * @param {Date|number|string} [opts.generatedAt] - timestamp used in default footer; current time if omitted
@@ -152,7 +152,7 @@ const SECTION_DIVIDER = "\n\n---\n\n";
  *
  * @typedef {object} ReportSection
  * @property {string} [emoji]      - palette glyph (e.g. PALETTE.SCHEDULE)
- * @property {string} title        - section title; renders as `emoji **N. bold**`
+ * @property {string} title        - section title; renders as `emoji **bold**` (a `• ` marker leads the title only when the section has no emoji)
  * @property {number} [count]      - optional "(N)" suffix after the title
  * @property {string[]} [items]    - bullet list lines (already markdown-formatted)
  * @property {string} [lines]      - raw multi-line content; mutually exclusive with items
@@ -179,16 +179,16 @@ export function buildReport(opts = {}) {
   if (subtitle) out.push(`*${subtitle}*`);
 
   // `body` is a pre-formatted markdown narrative (e.g. an LLM-generated brief that
-  // already carries its own numbered emoji+bold sections). When present it renders
-  // verbatim with no section wrapper, so we do not double-number it.
+  // already carries its own emoji+bold sections). When present it renders
+  // verbatim with no section wrapper, so we do not re-wrap or re-mark it.
   const hasBody = typeof body === "string" && body.trim().length > 0;
   const sectionList = hasBody ? [] : (Array.isArray(sections) ? sections : []);
-  // Numbering only earns its keep with 2+ sections. A lone section gets a clean
-  // emoji+bold header with no "1." prefix, so single-item cards stop reading like
-  // an auto-generated cron report.
-  const numbered = sectionList.length > 1;
+  // A bullet marker only earns its keep with 2+ sections. A lone section gets a
+  // clean emoji+bold header with no marker, so single-item cards stop reading
+  // like an auto-generated cron report.
+  const multiSection = sectionList.length > 1;
   const renderedSections = sectionList
-    .map((sec, i) => renderSection(sec, i, numbered))
+    .map((sec, i) => renderSection(sec, i, multiSection))
     .filter(Boolean);
 
   if (hasBody) {
@@ -235,14 +235,18 @@ export function buildReport(opts = {}) {
   return report;
 }
 
-function renderSection(sec, index = 0, numbered = true) {
+function renderSection(sec, index = 0, multiSection = true) {
   if (!sec || typeof sec !== "object") return "";
   const headerEmoji = sec.emoji ? `${sec.emoji} ` : "";
   const countSuffix = typeof sec.count === "number" ? ` *(${sec.count})*` : "";
-  // House style: emoji+bold section headers, no markdown `###`. The numeric
-  // prefix is added only when the card has multiple sections (see buildReport).
-  const numPrefix = numbered ? `${index + 1}. ` : "";
-  const heading = `${headerEmoji}**${numPrefix}${sec.title || ""}**${countSuffix}`.trim();
+  // House style: emoji+bold section headers, no markdown `###`. Section titles
+  // are parallel categories, not an ordered sequence, so they are bulleted, not
+  // numbered. The palette emoji already reads as the bullet, so an emoji-led
+  // header carries no extra marker; an emoji-less header in a multi-section card
+  // gets a "• " so it still reads as a list. The `index` is retained for callers
+  // and future ordinal needs but no longer stamps a number.
+  const bulletPrefix = multiSection && !headerEmoji ? "• " : "";
+  const heading = `${headerEmoji}**${bulletPrefix}${sec.title || ""}**${countSuffix}`.trim();
 
   let body;
   if (typeof sec.lines === "string" && sec.lines.length > 0) {

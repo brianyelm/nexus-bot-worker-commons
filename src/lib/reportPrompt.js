@@ -8,20 +8,23 @@
 // buildReportPrompt() returns the { system, user } strings that instruct the
 // model to emit the canonical FLEET_OUTPUT_STYLE section shape:
 //
-//     <emoji> **1. Section Title**
+//     <emoji> **Section Title**
 //     <prose or bullets>
 //
-//     <emoji> **2. Section Title**
+//     <emoji> **Section Title**
 //     ...
 //
-// The emoji + number + title for each section are baked into the prompt by the
-// CALLER (via the `sections` spec), not chosen by the model. This removes
-// freelance-emoji violations and keeps numbering deterministic. The model only
+// Section titles are parallel categories, not an ordered sequence, so headers
+// are bulleted rather than numbered: the palette emoji reads as the bullet, so
+// an emoji-led header carries no extra marker; an emoji-less header gets a "• ".
+// The emoji + title for each section are baked into the prompt by the CALLER
+// (via the `sections` spec), not chosen by the model. This removes
+// freelance-emoji violations and keeps headers deterministic. The model only
 // fills the body under each pre-specified header.
 //
 // The caller passes the returned narrative to buildReport({ ..., body }) so the
 // `##` document title, subtitle, and footer are added deterministically and the
-// numbered sections are NOT double-wrapped.
+// sections are NOT double-wrapped.
 // =============================================================================
 
 /**
@@ -56,18 +59,19 @@ export function buildReportPrompt(opts = {}) {
 
   const cleanSections = (Array.isArray(sections) ? sections : [])
     .filter(sec => sec && typeof sec === "object" && sec.title);
-  // Number the headers only when there are 2+ sections; a single section reads
-  // as a plain header, matching buildReport's single-section behavior.
-  const numbered = cleanSections.length > 1;
-  const specLines = cleanSections.map((sec, i) => {
+  // Bullet an emoji-less header only when there are 2+ sections; a single
+  // section reads as a plain header, matching buildReport's behavior. An
+  // emoji-led header needs no marker since the emoji reads as the bullet.
+  const multiSection = cleanSections.length > 1;
+  const specLines = cleanSections.map((sec) => {
     const emoji = sec.emoji ? `${sec.emoji} ` : "";
     const kind = sec.kind === "bullets" ? "bullets" : "prose";
     const shape = kind === "bullets"
       ? 'bullets of the form "- **Lead term:** detail"'
       : "1-3 full sentences in an executive voice";
     const hint = sec.hint ? ` -- ${sec.hint}` : "";
-    const numPrefix = numbered ? `${i + 1}. ` : "";
-    return `${emoji}**${numPrefix}${sec.title}**\n(${shape}${hint})`;
+    const bulletPrefix = multiSection && !emoji ? "• " : "";
+    return `${emoji}**${bulletPrefix}${sec.title}**\n(${shape}${hint})`;
   });
 
   const caveatBlock = caveats.length
@@ -82,9 +86,9 @@ export function buildReportPrompt(opts = {}) {
 
   const user = `You are ${botName}, ${role} for Black Raven IT. Write a brief covering ${period}.`
     + dataBlock
-    + `\n\nReproduce the section headers below EXACTLY as written (same emoji, same number, same `
-    + `title), then write the body underneath each one. Do not add, remove, reorder, or renumber `
-    + `sections. Do not add a document title (it is added separately). Do not use \`#\`, \`##\`, `
+    + `\n\nReproduce the section headers below EXACTLY as written (same emoji, same marker, same `
+    + `title), then write the body underneath each one. Do not add, remove, or reorder sections, and `
+    + `do not number the section headers. Do not add a document title (it is added separately). Do not use \`#\`, \`##\`, `
     + `or \`###\` markdown headers anywhere. Do not introduce any emoji other than the ones shown.\n\n`
     + specLines.join("\n\n")
     + `\n\nRules: use specific numbers from the context, never invent facts, names, or details not `

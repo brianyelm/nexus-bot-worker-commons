@@ -7,7 +7,7 @@ else in your persona, this wins.
 ## Two output modes -- pick one per reply
 
 1. **Rich report.** Scheduled briefings, digests, multi-section summaries,
-   recaps, anything a human will skim. Numbered emoji+bold sections (NOT
+   recaps, anything a human will skim. Bulleted emoji+bold sections (NOT
    `###` headers), bullet lists, optional tables, mentions, channel links.
 2. **Fenced bangReport.** Healthcheck output, raw stack traces, JSON dumps,
    monitor errors, command-output echoes, anything that should stay
@@ -37,12 +37,14 @@ bangReport when a developer will read it.
 
 ### Section headers (zero or more per message)
 
-`:palette_emoji: **N. Title** *(N)*`
+`:palette_emoji: **Title** *(N)*`
 
-- Numbered, emoji-prefixed, bold inline text. **NEVER `###` (or any markdown
+- Bulleted, emoji-prefixed, bold inline text. **NEVER `###` (or any markdown
   header) for sections.** This is the house style -- the `###` is gone.
 - Each section starts on its own line with exactly one palette emoji (section 8),
-  a space, then `**N. Title**` in bold. Number sequentially from 1.
+  a space, then `**Title**` in bold. Section titles are parallel categories, not
+  an ordered sequence, so do NOT number them. The leading emoji reads as the
+  bullet; a section with no emoji takes a literal `• ` before the bold title.
 - Title in sentence case. Never bare ALL-CAPS.
 - Optional `*(N)*` count after the bold close when the section is a list with a
   knowable size.
@@ -54,8 +56,10 @@ bangReport when a developer will read it.
 
 ### Lists
 
-- Numbering belongs to **sections** (section 2), not to list items. A list
-  *inside* a section uses bullets, not numbers.
+- Section headers are bulleted, not numbered (section 2). Reserve numbered
+  lists (`1.`, `2.`) for genuinely ordered content *inside* a section: ranked
+  items, ordered steps, a runbook sequence. A plain unordered list inside a
+  section uses bullets.
 - Bullets: `-` or `•`. Never `*`.
 - One line per item. Long detail wraps to a sub-bullet (two-space indent),
   never mid-sentence.
@@ -146,8 +150,8 @@ unused fleet-wide. Added: `SECURITY 🛡` for Robert, `BREACH 🔓` for Dexter
 breach alerts, `DEVICES 🖥` for endpoint/fleet sections.
 
 One emoji per section header. Never two in a row. Never inside list items.
-Emoji outside this palette in a numbered `N. **Title**` section line is a
-fleet-rule violation and surfaces in the daily healing scorecard.
+Emoji outside this palette in a `**Title**` section line is a fleet-rule
+violation and surfaces in the daily healing scorecard.
 
 ## 9. Chat reply rules
 
@@ -166,7 +170,9 @@ If a chat reply is under 240 chars and not a list, no markdown at all.
 
 - No bare CAPS headers (`OPEN TICKETS:`).
 - No `###` (or any `#`/`##`/`####`) markdown headers for sections. Sections are
-  numbered emoji+bold inline text. The only `##` permitted is the post title.
+  bulleted emoji+bold inline text. The only `##` permitted is the post title.
+- No numbered section headers (`1.`, `2.`). Numbering is for ordered list items
+  inside a section, never for the section headers themselves.
 - No raw timestamps (`1747862400`, `2026-05-20T14:00:00Z`).
 - No mixed emoji density. Pick one per section, stop.
 - No em dashes or en dashes. Use `--` or `:` or a comma.
@@ -190,24 +196,24 @@ If a chat reply is under 240 chars and not a list, no markdown at all.
 ## 🚨 CISO Brief: 2026-06-05 `DEGRADED`
 *Risk posture: Degraded*
 
-📊 **1. Risk Posture Summary**
+📊 **Risk Posture Summary**
 Posture degraded over the last 24h. Two critical cases opened and one endpoint
 shows active infection. Direction of travel is negative.
 
 ---
 
-🚨 **2. Top Attention Items**
+🚨 **Top Attention Items**
 - **Critical case CASE-4821:** ransomware indicators on FINANCE-PC07.
 - **Infected endpoint:** SALES-LT12, isolation recommended.
 
 ---
 
-🖥 **3. Fleet Health**
+🖥 **Fleet Health**
 238 endpoints under coverage. 3 outdated agents pending update.
 
 ---
 
-🏁 **4. Today's Priorities**
+🏁 **Today's Priorities**
 - **Contain SALES-LT12:** isolate and remediate.
 - **Triage CASE-4821:** assign a SOC analyst.
 
@@ -221,7 +227,7 @@ shows active infection. Direction of travel is negative.
 ## 📧 Daily Digest
 *Wednesday, May 20, 2026*
 
-📧 **1. Inbox** *(3)*
+📧 **Inbox** *(3)*
 - **Megan Lysko:** RE: GP rollout, today 9:14 AM
 - **Onyi Odunukwe:** new prospect intake, today 8:02 AM
 - **Pax8 alerts:** 3 license expirations, Thu 7:30 AM
@@ -229,13 +235,13 @@ _+4 more_
 
 ---
 
-🎫 **2. Tickets needing eyes** *(2)*
+🎫 **Tickets needing eyes** *(2)*
 - **#21847 Bella Bagno POS offline:** open 47m, owner <@bot_dexter>
 - **#21851 Railhead VPN slow:** open 12m, owner <@bot_courtney>
 
 ---
 
-📅 **3. Today's schedule**
+📅 **Today's schedule**
 - 10:00 AM Sesotec QBR
 - 1:30 PM Brian / Megan 1:1
 - 3:00 PM Pax8 demo
@@ -290,8 +296,8 @@ Raven Watch | June 2026 -- Service Spotlight
 *Jacob · Newsletter approval · ready to send*
 ```
 
-HITL cards drop the section number by default (approvals read better unnumbered),
-but still use the emoji+bold section style -- never `###`.
+HITL cards use the same bulleted emoji+bold section style as every other report
+-- never numbered, never `###`.
 
 Buttons attach beneath via `postHitlCard` from commons. Button labels and
 ids are constrained to the canonical `BUTTON_LABELS` set, so the visible
@@ -305,7 +311,7 @@ helper, not freelanced at the call site.
 
 *47 records across 3 sources, immediate review recommended*
 
-🔓 **1. Exposed credentials**
+🔓 **Exposed credentials**
 - **Plaintext passwords:** 12
 - **High-severity credentials:** 4
 - **Emails exposed:** 12
