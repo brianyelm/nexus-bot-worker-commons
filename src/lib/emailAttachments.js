@@ -335,3 +335,38 @@ export async function buildEmailAttachmentBlocks(env, graphJson, messageId, opts
 
   return { blocks: acc.blocks, warnings: acc.warnings, names: acc.names };
 }
+
+/**
+ * Convenience wrapper for email pollers that already hold a Graph app token and
+ * the target mailbox address: builds the `/users/{mailbox}` GET closure for you
+ * and returns the attachment content blocks. Lets a cron poller decode a
+ * forwarded report (DMARC/PDF/etc.) in one call instead of re-deriving the Graph
+ * plumbing in every job.
+ *
+ * @param {object} env
+ * @param {object} opts
+ * @param {string} opts.token - Graph access token (app-only)
+ * @param {string} opts.mailbox - mailbox address the message lives in
+ * @param {string} opts.messageId
+ * @param {string} [opts.graphBase="https://graph.microsoft.com/v1.0"]
+ * @param {number} [opts.maxFiles]
+ * @returns {Promise<{blocks: object[], warnings: string[], names: string[]}>}
+ */
+export async function emailAttachmentBlocksByToken(env, { token, mailbox, messageId, graphBase = "https://graph.microsoft.com/v1.0", maxFiles } = {}) {
+  if (!token || !mailbox || !messageId) {
+    return { blocks: [], warnings: ["emailAttachmentBlocksByToken: token, mailbox, and messageId are required"], names: [] };
+  }
+  const mb = encodeURIComponent(mailbox);
+  const graphJson = async (path) => {
+    const res = await fetch(`${graphBase}/users/${mb}${path}`, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`graph ${path} ${res.status}: ${text.slice(0, 200)}`);
+    }
+    return res.json();
+  };
+  return buildEmailAttachmentBlocks(env, graphJson, messageId, maxFiles ? { maxFiles } : {});
+}
