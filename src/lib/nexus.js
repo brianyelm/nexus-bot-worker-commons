@@ -359,6 +359,80 @@ export async function uploadBotAttachment(env, bytes, filename, mime, options = 
 }
 
 /**
+ * Detect an image mime type from the first bytes (magic numbers), since some
+ * hosts (e.g. Azure Blob) serve images as application/octet-stream. Returns
+ * null for non-image bytes so callers can skip them.
+ * @param {Uint8Array} buf
+ * @returns {{mime: string, ext: string}|null}
+ */
+function sniffImageMime(buf) {
+  if (!buf || buf.length < 12) return null;
+  const b = buf;
+  if (b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47) return { mime: "image/png", ext: "png" };
+  if (b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff) return { mime: "image/jpeg", ext: "jpg" };
+  if (b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46) return { mime: "image/gif", ext: "gif" };
+  // RIFF....WEBP
+  if (b[0] === 0x52 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x46 && b[8] === 0x57 && b[9] === 0x45 && b[10] === 0x42 && b[11] === 0x50) {
+    return { mime: "image/webp", ext: "webp" };
+  }
+  return null;
+}
+
+/**
+ * Fetch images by URL and upload them as bot attachments, returning the
+ * attachment ids ready for postToNexus(..., { attachment_ids }). Best-effort:
+ * any image that fails to fetch, is not actually an image, or exceeds the size
+ * cap is skipped, never thrown. Handy for vendor product photos and other
+ * remote media that should render inline in a post.
+ *
+ * @param {object} env
+ * @param {Array<string | {url: string, filename?: string}>} images - URLs or
+ *   {url, filename} entries. Spaces in URLs are encoded automatically.
+ * @param {object} [options]
+ * @param {string} [options.nexusKeyEnvVar] - env var holding the bot API key
+ * @param {number} [options.max=4] - cap on how many images to upload
+ * @returns {Promise<string[]>} uploaded attachment ids (order preserved)
+ */
+export async function attachImagesFromUrls(env, images, options = {}) {
+  const MAX_BYTES = 24 * 1024 * 1024; // under the 25 MiB server cap
+  const list = (images || [])
+    .map((i) => (typeof i === "string" ? { url: i } : i))
+    .filter((i) => i && typeof i.url === "string" && i.url.trim());
+  const max = Number.isFinite(options.max) ? options.max : 4;
+
+  const ids = [];
+  for (const img of list.slice(0, max)) {
+    try {
+      const fetchUrl = img.url.trim().replace(/ /g, "%20");
+      const res = await fetch(fetchUrl, { signal: AbortSignal.timeout(20000) });
+      if (!res.ok) continue;
+      const buf = new Uint8Array(await res.arrayBuffer());
+      if (!buf.length || buf.length > MAX_BYTES) continue;
+      const kind = sniffImageMime(buf);
+      if (!kind) continue; // not a renderable image
+      const filename = sanitizeAttachmentName(img.filename) || `image.${kind.ext}`;
+      const id = await uploadBotAttachment(env, buf, filename, kind.mime, options);
+      if (id) ids.push(id);
+    } catch (err) {
+      console.warn(`[nexus] attachImagesFromUrls failed for ${img.url}:`, err.message);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Normalize a remote filename to a safe attachment name with an image
+ * extension, collapsing odd characters.
+ * @param {string} [name]
+ * @returns {string|null}
+ */
+function sanitizeAttachmentName(name) {
+  if (!name || typeof name !== "string") return null;
+  const cleaned = name.trim().replace(/[^\w.\-() ]+/g, "_").replace(/\s+/g, " ").slice(0, 120);
+  return cleaned || null;
+}
+
+/**
  * Attach interactive buttons to a Nexus message.
  * Uses POST /api/bot/messages/:id/buttons (Bearer auth, bot-side route added 2026-05-10).
  *
