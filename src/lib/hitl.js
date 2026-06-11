@@ -28,7 +28,7 @@
 // D1 table: hitl_pending (migration 003_hitl_pending.sql)
 // =============================================================================
 
-import { postToNexus, attachButtons } from "./nexus.js";
+import { postToNexus, attachButtons, settleMessageComponents } from "./nexus.js";
 
 const DEFAULT_DB_BINDING = "DB";
 
@@ -274,6 +274,11 @@ export async function processButtonClick(env, payload, options = {}) {
       console.error("[hitl] processButtonClick D1 error:", err.message);
     }
   }
+
+  // Strip the original card's Approve/Deny controls now that it is resolved, so
+  // a settled SOC card cannot be re-clicked. The decision detail is carried by
+  // the resolution post below; we only retire the stale buttons here.
+  await settleMessageComponents(env, cardMessageId, nexusOptions).catch(() => {});
 
   const decidedBy = display_name || user_id || "unknown";
   const opLabel = pending?.action_payload?.operation || pending?.action_payload?.service || "unknown";
