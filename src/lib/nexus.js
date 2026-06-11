@@ -38,6 +38,7 @@
 
 import { getProvenanceContext } from "./provenanceContext.js";
 import { scrubFleetDashes } from "./sanitize.js";
+import { buildReport } from "./embedCard.js";
 
 // Lazy import to avoid circular dependency: fleetError imports postToNexus,
 // so we must not import at module load time (CF Workers module-scope I/O ban
@@ -571,6 +572,45 @@ export async function settleMessageComponents(env, messageId, options = {}) {
     }, options)).catch(() => {});
     return null;
   }
+}
+
+/**
+ * Settle a resolved HITL card to a terse status line and strip its controls.
+ *
+ * The pending HITL card already showed the reviewer the full message, so the
+ * settled card must NOT re-print it ("don't read it twice"). This collapses the
+ * card to a single status line (title + "<status> by <actor>" + auto footer
+ * timestamp) and then removes the action buttons + modal triggers via
+ * settleMessageComponents. One call replaces the old "edit a verbose outcome
+ * card, then disable buttons" pattern.
+ *
+ * @param {object} env
+ * @param {string} messageId - Nexus message id of the card being settled
+ * @param {object} params
+ * @param {string} [params.botName]  - bot display name for the footer ("Courtney")
+ * @param {string} [params.title]    - card title ("External Reply")
+ * @param {string} [params.status="Actioned"] - outcome verb ("Sent", "Rejected", "Canceled")
+ * @param {string} [params.actor]    - who actioned it (display name)
+ * @param {boolean} [params.rejected=false] - render the 🛑 glyph instead of ✅
+ * @param {string} [params.footer]   - optional footer override
+ * @param {object} [options] - nexus options (nexusKeyEnvVar, etc.)
+ * @returns {Promise<object|null>} settle result or null
+ */
+export async function settleHitlCard(env, messageId, params = {}, options = {}) {
+  if (!messageId) return null;
+  const { botName = "", title = "Request", status = "Actioned", actor, rejected = false, footer } = params;
+  const subtitleParts = [status];
+  if (actor) subtitleParts.push(`by ${actor}`);
+  const body = buildReport({
+    botName,
+    emoji: rejected ? "🛑" : "✅",
+    title,
+    subtitle: subtitleParts.join(" "),
+    sections: [],
+    ...(footer ? { footer } : {}),
+  });
+  await editNexusMessage(env, messageId, body, options).catch(() => {});
+  return settleMessageComponents(env, messageId, options);
 }
 
 /**
