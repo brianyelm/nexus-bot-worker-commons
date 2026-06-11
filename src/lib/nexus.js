@@ -532,6 +532,48 @@ export async function disableMessageButtons(env, messageId, target = {}, options
 }
 
 /**
+ * Settle a HITL card's interactive components once its outcome is final.
+ * Strips the action buttons + modal triggers + select menus the bot attached
+ * (link buttons are preserved server-side) so a sent/rejected card no longer
+ * shows a live Reject button or Edit modal trigger.
+ *
+ * Use this instead of disableMessageButtons when a card carries a modal trigger
+ * (e.g. an "Edit reply" Edit modal): disableMessageButtons only greys buttons
+ * and cannot retire a modal trigger.
+ *
+ * Best-effort: returns null and reports a fleet error on failure so a settle
+ * miss never blocks the caller.
+ *
+ * @param {object} env
+ * @param {string} messageId - Nexus message id whose card is now settled
+ * @param {object} [options]
+ * @param {string} [options.nexusKeyEnvVar] - env var name holding the API key
+ * @returns {Promise<object|null>} settle result or null on error
+ */
+export async function settleMessageComponents(env, messageId, options = {}) {
+  const apiKey = resolveNexusKey(env, options);
+  if (!apiKey || !env.NEXUS_BASE_URL) return null;
+
+  try {
+    const result = await _bearerPostWithRetry(
+      `${env.NEXUS_BASE_URL}/api/bot/messages/${messageId}/components/settle`,
+      {},
+      apiKey,
+    );
+    return result?.data || null;
+  } catch (err) {
+    console.warn(`[nexus] settleMessageComponents(${messageId}) failed:`, err.message);
+    _getReportFleetError().then(fn => fn(env, {
+      bot: deriveBotName(env, options),
+      op: "settleMessageComponents",
+      msg: err.message,
+      ctx: { messageId },
+    }, options)).catch(() => {});
+    return null;
+  }
+}
+
+/**
  * Attach message-modal triggers to a Nexus message.
  * Uses POST /api/bot/messages/:id/modals (Bearer auth, same as attachButtons).
  *
