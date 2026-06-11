@@ -92,7 +92,7 @@ test("xero builders produce expected urls and null on missing id", () => {
   );
   assert.equal(
     xeroInvoiceUrl("INV-9"),
-    "https://go.xero.com/AccountsReceivable/Edit.aspx?InvoiceID=INV-9",
+    "https://go.xero.com/app/invoicing/view/INV-9",
   );
   assert.equal(xeroBankAccountUrl(null), null);
   assert.equal(xeroBillUrl(""), null);

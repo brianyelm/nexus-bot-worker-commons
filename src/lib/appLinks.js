@@ -145,13 +145,16 @@ export function xeroBillUrl(invoiceId) {
 }
 
 /**
- * Xero accounts-receivable invoice editor.
+ * Xero accounts-receivable invoice deep link (new invoicing).
+ * The legacy /AccountsReceivable/Edit.aspx?InvoiceID= path is classic-invoicing
+ * only; for invoices created in new invoicing it lands on the create-new screen,
+ * so we use the /app/invoicing/view/{guid} route which resolves drafts too.
  * @param {string} invoiceId - Xero InvoiceID GUID for an ACCREC invoice
  * @returns {string|null}
  */
 export function xeroInvoiceUrl(invoiceId) {
   if (!invoiceId) return null;
-  return `https://go.xero.com/AccountsReceivable/Edit.aspx?InvoiceID=${encodeURIComponent(invoiceId)}`;
+  return `https://go.xero.com/app/invoicing/view/${encodeURIComponent(invoiceId)}`;
 }
 
 // ── SentinelOne / Stellar Cyber (templates live in robert wrangler.toml) ────
