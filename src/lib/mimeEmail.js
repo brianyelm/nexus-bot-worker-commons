@@ -96,6 +96,10 @@ function qEncode(s) {
  * @param {string} opts.htmlBody - HTML content
  * @param {string} [opts.textBody] - plain text (auto-derived from HTML if omitted)
  * @param {Array<{name: string, contentType?: string, contentBytes: Uint8Array}>} [opts.attachments]
+ * @param {string} [opts.listUnsubscribe] - RFC 8058 List-Unsubscribe header value
+ *   (e.g. "<https://.../u/token>, <mailto:unsub@x?subject=...>"). When set, a
+ *   List-Unsubscribe-Post: List-Unsubscribe=One-Click header is added too so
+ *   bulk sends qualify for Gmail/Yahoo one-click unsubscribe.
  * @returns {{mime: string, messageId: string}}
  */
 export function buildMimeMessage(opts) {
@@ -109,6 +113,7 @@ export function buildMimeMessage(opts) {
     htmlBody: rawHtml,
     textBody: rawText,
     attachments,
+    listUnsubscribe,
   } = opts;
 
   // Strip em/en dashes from human-facing fields before MIME assembly. Fleet
@@ -142,6 +147,14 @@ export function buildMimeMessage(opts) {
     `Message-ID: ${messageId}`,
     "MIME-Version: 1.0",
   );
+
+  // RFC 8058 one-click unsubscribe. Both headers are required for Gmail/Yahoo
+  // to render the one-click control; the Post header signals the recipient's
+  // mail client may POST the List-Unsubscribe URL without a confirmation step.
+  if (listUnsubscribe) {
+    headerLines.push(`List-Unsubscribe: ${listUnsubscribe}`);
+    headerLines.push("List-Unsubscribe-Post: List-Unsubscribe=One-Click");
+  }
 
   if (hasAttachments) {
     headerLines.push(`Content-Type: multipart/mixed; boundary="${mixedBoundary}"`);
