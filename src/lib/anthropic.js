@@ -79,23 +79,47 @@ function applyCacheToTools(tools) {
 }
 
 /**
- * Raw POST to the Anthropic Messages API.
+ * Resolve where Anthropic calls go. When env.AI_GATEWAY_ANTHROPIC_URL is set
+ * (only on workers opted into the CF AI Gateway pilot, e.g. courtney-worker),
+ * route through the gateway and tag the request; otherwise hit the direct API.
+ * Fail-open: unset = today's behavior, so the whole fleet is unaffected.
+ *
+ * @param {object} env
+ * @param {string} [surface] - dashboard tag (chat/attachment/watercooler)
+ * @returns {{ url: string, metadata: object|null }}
+ */
+function resolveAnthropicRoute(env, surface) {
+  const gw = env && env.AI_GATEWAY_ANTHROPIC_URL;
+  if (!gw) return { url: API_URL, metadata: null };
+  return {
+    url: gw,
+    metadata: { bot: env.AI_GATEWAY_BOT || env.WORKER_NAME || "bot", surface: surface || "chat" },
+  };
+}
+
+/**
+ * Raw POST to the Anthropic Messages API (or the AI Gateway when route.url set).
  *
  * @param {string} apiKey
  * @param {object} body
+ * @param {{ url?: string, metadata?: object }} [route]
  * @returns {Promise<object>} Parsed JSON response
  */
-async function _post(apiKey, body) {
+async function _post(apiKey, body, route = {}) {
+  const url = route.url || API_URL;
+  const headers = {
+    "x-api-key": apiKey,
+    "anthropic-version": ANTHROPIC_VERSION,
+    "content-type": "application/json",
+    "anthropic-beta": "prompt-caching-2024-07-31",
+  };
+  // Tag the request for the CF AI Gateway dashboard when routed through it.
+  if (route.metadata) headers["cf-aig-metadata"] = JSON.stringify(route.metadata);
   let res;
   try {
-    res = await fetch(API_URL, {
+    res = await fetch(url, {
       method: "POST",
-      headers: {
-        "x-api-key": apiKey,
-        "anthropic-version": ANTHROPIC_VERSION,
-        "content-type": "application/json",
-        "anthropic-beta": "prompt-caching-2024-07-31",
-      },
+      headers,
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
@@ -158,7 +182,7 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
     messages: applyCacheToLastMessage(messages),
   };
 
-  const data = await _post(apiKey, body);
+  const data = await _post(apiKey, body, resolveAnthropicRoute(env, options.surface));
   const text = data?.content?.[0]?.text;
   if (typeof text !== "string") {
     throw new Error(`[anthropic] unexpected response shape: ${JSON.stringify(data)}`);
@@ -208,6 +232,7 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
 
   if (!apiKey) throw new Error("[anthropic] ANTHROPIC_API_KEY is not configured");
 
+  const route = resolveAnthropicRoute(env, options.surface || "chat");
   const toolsWithCache = applyCacheToTools(tools);
 
   const baseParams = {
@@ -239,7 +264,7 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
   response = await _post(apiKey, {
     ...baseParams,
     messages: applyCacheToLastMessage(workingMessages),
-  });
+  }, route);
   if (response.usage) {
     usageAcc.input_tokens += response.usage.input_tokens || 0;
     usageAcc.output_tokens += response.usage.output_tokens || 0;
@@ -283,7 +308,7 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
           ...baseParams,
           tool_choice: { type: "none" },
           messages: applyCacheToLastMessage(workingMessages),
-        });
+        }, route);
         if (response.usage) {
           usageAcc.input_tokens += response.usage.input_tokens || 0;
           usageAcc.output_tokens += response.usage.output_tokens || 0;
@@ -360,7 +385,7 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
     response = await _post(apiKey, {
       ...baseParams,
       messages: applyCacheToLastMessage(workingMessages),
-    });
+    }, route);
     if (response.usage) {
       usageAcc.input_tokens += response.usage.input_tokens || 0;
       usageAcc.output_tokens += response.usage.output_tokens || 0;
