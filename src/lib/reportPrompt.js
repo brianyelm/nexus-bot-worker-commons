@@ -82,7 +82,7 @@ export function buildReportPrompt(opts = {}) {
 
   const system = `You are ${botName}, ${role} for Black Raven IT. Write concise, executive-level `
     + `briefings for the MSP leadership team. Direct, crisp, no jargon padding, no fluff. `
-    + `Do not use em dashes or en dashes.`;
+    + `Do not use em dashes, en dashes, or double hyphens (--); separate clauses with commas like a person does.`;
 
   const user = `You are ${botName}, ${role} for Black Raven IT. Write a brief covering ${period}.`
     + dataBlock
@@ -93,7 +93,7 @@ export function buildReportPrompt(opts = {}) {
     + specLines.join("\n\n")
     + `\n\nRules: use specific numbers from the context, never invent facts, names, or details not `
     + `present above. If a section has nothing to report, say so plainly rather than manufacturing `
-    + `content or urgency. No em dashes or en dashes.`
+    + `content or urgency. No em dashes, en dashes, or double hyphens (--); use commas to separate clauses.`
     + caveatBlock;
 
   return { system, user };

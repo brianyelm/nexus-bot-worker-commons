@@ -70,8 +70,16 @@ test("scrubFleetDashes replaces en-dash with hyphen", () => {
   assert.equal(scrubFleetDashes("Mon – Fri"), "Mon - Fri");
 });
 
-test("scrubFleetDashes leaves ASCII characters alone", () => {
-  assert.equal(scrubFleetDashes("plain text -- with dashes"), "plain text -- with dashes");
+test("scrubFleetDashes replaces a spaced double-hyphen pause with comma-space", () => {
+  assert.equal(scrubFleetDashes("plain text -- with dashes"), "plain text, with dashes");
+  assert.equal(scrubFleetDashes("Owner -- email sent"), "Owner, email sent");
+});
+
+test("scrubFleetDashes leaves CLI flags, ranges, and bare hyphens alone", () => {
+  // Only a double-hyphen with whitespace on BOTH sides is the dash-as-pause.
+  assert.equal(scrubFleetDashes("npm run deploy -- --skip-tests"), "npm run deploy, --skip-tests");
+  assert.equal(scrubFleetDashes("2024--2025"), "2024--2025");
+  assert.equal(scrubFleetDashes("well-known config"), "well-known config");
 });
 
 test("scrubFleetDashes passes through non-strings", () => {

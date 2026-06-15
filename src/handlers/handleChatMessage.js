@@ -46,6 +46,7 @@ import { transcodeToJpeg } from "../lib/imageTranscode.js";
 import { shouldChimeIn } from "../lib/watercooler.js";
 import { phoenixToday } from "../lib/format.js";
 import { buildActionBreadcrumb, looksLikeUnbackedClaim } from "../lib/actionTrace.js";
+import { scrubFleetDashes } from "../lib/sanitize.js";
 
 // Detect GIF-only messages so bots receive "[GIF image: <url>]" instead of
 // a bare CDN URL they cannot interpret.
@@ -1734,7 +1735,7 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     }
 
     if (response && response.trim()) {
-      const cleaned = response.trim().replace(/[—–]/g, "-");
+      const cleaned = scrubFleetDashes(response.trim());
       if (looksLikeWatercoolerMetaLeak(cleaned)) {
         console.warn(`[watercooler] ${config.botName} meta-leak suppressed: ${cleaned.slice(0, 80)}`);
         return;
