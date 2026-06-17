@@ -37,7 +37,6 @@ import { rememberFact, forgetFact, listFacts, buildFactsBlock } from "../lib/mem
 import { persistTurnPair, resolveEntity, getEntityContext, assertFact } from "../lib/memoryService.js";
 import { callAnthropicWithTools, callAnthropic } from "../lib/anthropic.js";
 import { postToNexus, sendTyping, fetchChannelMessages, fetchThreadMessages } from "../lib/nexus.js";
-import { captureQa } from "../lib/qaCapture.js";
 import { postApprovalCard } from "../lib/hitl.js";
 import { withProvenance } from "../lib/provenanceContext.js";
 import { bangReport } from "../lib/embedCard.js";
@@ -45,7 +44,7 @@ import { buildAttachmentContentBlocks, buildBlock } from "../lib/attachments.js"
 import { transcodeToJpeg } from "../lib/imageTranscode.js";
 import { shouldChimeIn } from "../lib/watercooler.js";
 import { phoenixToday } from "../lib/format.js";
-import { buildActionBreadcrumb, looksLikeUnbackedClaim } from "../lib/actionTrace.js";
+import { buildActionBreadcrumb } from "../lib/actionTrace.js";
 import { scrubFleetDashes } from "../lib/sanitize.js";
 
 // Detect GIF-only messages so bots receive "[GIF image: <url>]" instead of
@@ -1379,33 +1378,6 @@ export async function runLlmPipeline({
     }
   }
 
-  // QA capture (best-effort, no LLM). Mirrors this chat turn to <bot>-qa for the
-  // daily fleet-healer review. Runs AFTER the reply is posted, so it adds no
-  // user-facing latency; self-gates on QA_CAPTURE_ENABLED and swallows its own
-  // errors, so it can never affect the conversation.
-  await captureQa(env, {
-    bot: config.botName,
-    kind: "chat.turn",
-    surface: "chat",
-    summary: visibleResponse || responseText || "",
-    detail: JSON.stringify({
-      user: (labeledUserText || "").slice(0, 600),
-      reply: (visibleResponse || "").slice(0, 600),
-      had_action: !!actionMatch,
-      tools_called: toolTrace.map((t) => t.name),
-      // Reply asserts success but no write tool ran this turn -- the
-      // "said done, did nothing" failure. Surfaced for fleet-healer QA
-      // review, never used to suppress the reply.
-      claimed_without_action: looksLikeUnbackedClaim(visibleResponse, toolTrace),
-    }),
-    meta: {
-      channel: channel_slug,
-      user_id,
-      model: env.CLAUDE_MODEL || null,
-      input_tokens: capturedUsage?.input_tokens,
-      output_tokens: capturedUsage?.output_tokens,
-    },
-  }, { nexusKeyEnvVar: config.nexusKeyEnvVar });
 }
 
 const META_LEAK_PATTERNS = [

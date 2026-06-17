@@ -48,9 +48,7 @@ export function scrubFleetDashes(text) {
 
 // -----------------------------------------------------------------------------
 // Warn-only detectors. These do not rewrite -- they return booleans that
-// callers (postToNexus, qaCapture) record into QA telemetry so the daily
-// healing scorecard can call out non-conformant posts. Once the scorecard
-// shows fleet-wide compliance, postToNexus is free to start rejecting.
+// callers (postToNexus) can use to flag non-conformant outbound text.
 // -----------------------------------------------------------------------------
 
 /**

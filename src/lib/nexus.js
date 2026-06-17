@@ -249,8 +249,8 @@ export async function postToNexus(env, slug, content, options = {}) {
     : null;
 
   // postedVia identifies the helper that built the post (postHitlCard,
-  // buildReport, bangAlert, bangReport, fleetError, qaCapture). Hand-rolled
-  // posts default to "raw" and surface in the daily healing scorecard.
+  // buildReport, bangAlert, bangReport, fleetError). Hand-rolled posts
+  // default to "raw".
   const postedVia = options.postedVia || "raw";
   const extraHeaders = { "X-Bot-Posted-Via": postedVia };
 
