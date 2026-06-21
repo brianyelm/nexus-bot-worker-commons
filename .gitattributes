@@ -1,0 +1,28 @@
+# Normalize line endings across the fleet. Store text as LF in git and check out
+# LF on every platform, so Windows working trees stop producing phantom CRLF
+# diffs (e.g. on generated files). Binary files are auto-detected and left alone.
+* text=auto eol=lf
+
+# Windows shell scripts must stay CRLF to run correctly under cmd.exe.
+*.bat  text eol=crlf
+*.cmd  text eol=crlf
+
+# Explicit binary safety (text=auto already auto-detects; belt and braces).
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.pdf  binary
+*.zip  binary
+*.gz   binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.eot  binary
+*.otf  binary
+*.mp3  binary
+*.mp4  binary
+*.wav  binary
+*.pfx  binary
