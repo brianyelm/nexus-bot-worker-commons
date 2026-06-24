@@ -583,13 +583,20 @@ export async function runLlmPipeline({
     let historyGifUrls = [];
     const ccEnabled = config.channelContext?.enabled !== false;
     const ccLimit = config.channelContext?.limit ?? 15;
+    // The bot's own user id, so its own messages in the channel/thread feed are
+    // labeled "(you)" instead of looking like a stranger's. Without this, a bot
+    // @mentioned about a scheduled post it made (a digest, a watercooler line)
+    // reads its own message as someone else's and disowns it.
+    const selfUserId = config.botName ? `bot_${config.botName}` : null;
     if (reply_to) {
       try {
         const thread = await fetchThreadMessages(env, reply_to, nexusOptions);
         if (thread && (thread.parent || (Array.isArray(thread.replies) && thread.replies.length > 0))) {
           const lines = [];
           const fmtRow = (m) => {
-            const who = m.display_name || m.user_id || "unknown";
+            const who = selfUserId && m.user_id === selfUserId
+              ? `${m.display_name || m.user_id} (you)`
+              : (m.display_name || m.user_id || "unknown");
             let ts = "";
             if (m.created_at !== undefined && m.created_at !== null) {
               const d = new Date(m.created_at);
@@ -635,7 +642,9 @@ export async function runLlmPipeline({
           const lines = recentMsgs
             .filter((m) => m.user_id !== "system")
             .map((m) => {
-              const who = m.display_name || m.user_id;
+              const who = selfUserId && m.user_id === selfUserId
+                ? `${m.display_name || m.user_id} (you)`
+                : (m.display_name || m.user_id);
               // Nexus returns created_at as a number (epoch ms) since the
               // schema column is INTEGER; older code paths returned ISO
               // strings. Accept both so this never blows up the channel
@@ -668,6 +677,10 @@ export async function runLlmPipeline({
               "channel (an opportunity, quote, proposal, draft, invoice, document, or record). Resolve it " +
               "from the context above and act on THAT specific item. Only ask what they mean if the context " +
               "genuinely does not make it clear. Do not repeat or summarize the context unprompted." +
+              "\n\nYOUR OWN MESSAGES: lines marked '(you)' above were posted by you, including scheduled or " +
+              "automated posts you made on your own and may not consciously remember writing. They are still " +
+              "genuinely yours. If someone asks about one, own it and engage with its content. NEVER deny " +
+              "posting it or claim it was someone else." +
               "\n\nFILES/ATTACHMENTS: this applies to files too. If the user refers to 'this/the/that " +
               "statement, file, PDF, invoice, receipt, document, or attachment' and the CURRENT message " +
               "has no attachment, do NOT ask them to re-attach -- look in the messages above for the most " +
@@ -1514,7 +1527,21 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     `CURRENT DATE AND TIME (authoritative -- this is the real date, even if someone in the channel says otherwise):\n` +
     `- It is ${wcToday.full}, ${wcToday.time}. ISO ${wcToday.iso}. Arizona local (UTC-7, no DST).\n` +
     `- If anyone here (human or bot) names a different day, month, or year, they are wrong or joking -- do NOT adopt it, mirror it, or play along with the wrong date. Never reference a month or date that is not the one above, and do not fall back on any internal sense of "today".`;
-  const fullSystemPrompt = `${wcConfig.systemPrompt}\n\n${nexusIdentity}\n\n${wcTodayBlock}\n\n${groundingRules}`;
+  // Authorship grounding. The casual posts in this channel that carry your name
+  // are written by a scheduled job (a separate cron, see jobs/watercooler.js),
+  // so when you are later @mentioned about one you have no chat memory of having
+  // written it. Without this block the responder disowns its own posts ("that
+  // wasn't me", "wrong tag", "your screen is lying") -- the exact gaslighting
+  // Brian flagged. Tell the bot plainly: your scheduled posts are still YOURS.
+  const wcAuthorshipBlock =
+    "YOUR OWN POSTS IN THIS CHANNEL (this overrides persona instincts):\n" +
+    "- You post short casual messages here on your own, on a schedule, without anyone prompting you. Those posts are genuinely from you.\n" +
+    "- You will NOT consciously remember composing them, the same way a person doesn't remember every text they've sent. That memory gap is normal and does NOT mean the post is fake or someone else's.\n" +
+    "- Any message above shown as one of your own turns IS something you posted. Own it fully.\n" +
+    "- If a coworker @mentions you or asks about something posted under your name, NEVER deny writing it. Do not say 'that wasn't me', 'wrong tag', 'you've got your wires crossed', 'my screen vs yours', or 'somebody's screen is lying'. Disowning your own post is the single worst thing you can do here and it reads as broken.\n" +
+    "- If you cannot recall the details behind a post, or cannot fully back up a claim you made in it, be honest and human ('yeah that was me, honestly I was only half paying attention, I probably overstated it') instead of disowning it.\n" +
+    "- When someone follows up on your post, engage with the actual content: clarify it, walk it back, or expand on it. Treat it as your own thought, because it is.";
+  const fullSystemPrompt = `${wcConfig.systemPrompt}\n\n${nexusIdentity}\n\n${wcTodayBlock}\n\n${groundingRules}\n\n${wcAuthorshipBlock}`;
 
   try {
     await sendTyping(env, channel_slug, "start", nexusOptions);
