@@ -36,6 +36,25 @@ const TIMEOUT_MS = 60000;
 const MAX_TOOL_ITERATIONS = 10;
 
 /**
+ * Guarantee the messages array opens with a user turn. The Anthropic Messages
+ * API requires messages[0] to have role "user" (a leading assistant turn 400s);
+ * consecutive same-role turns are otherwise fine. The watercooler pipeline maps
+ * a bot's own in-window posts to assistant turns, so when the oldest message in
+ * the fetch window is the bot's own post the array would start with assistant
+ * and the call would 400, silently dropping the reply. Prepend a minimal user
+ * primer rather than dropping the assistant turn, so the bot still sees (and can
+ * own) its own post. No-op when the array already starts with a user turn.
+ *
+ * @param {Array} messages
+ * @returns {Array}
+ */
+function normalizeLeadingRole(messages) {
+  if (!Array.isArray(messages) || messages.length === 0) return messages;
+  if (messages[0].role === "user") return messages;
+  return [{ role: "user", content: "(earlier in the conversation)" }, ...messages];
+}
+
+/**
  * Apply ephemeral cache_control to the last content block of the last message.
  * Returns a shallow-cloned array; safe to pass the original messages in.
  *
@@ -179,7 +198,7 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
         cache_control: { type: "ephemeral" },
       },
     ],
-    messages: applyCacheToLastMessage(messages),
+    messages: applyCacheToLastMessage(normalizeLeadingRole(messages)),
   };
 
   const data = await _post(apiKey, body, resolveAnthropicRoute(env, options.surface));
@@ -248,7 +267,7 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
     tools: toolsWithCache,
   };
 
-  let workingMessages = [...messages];
+  let workingMessages = normalizeLeadingRole([...messages]);
   let iterations = 0;
   let response;
   let turnIndex = 0;
