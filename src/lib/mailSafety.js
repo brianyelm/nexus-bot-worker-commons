@@ -26,9 +26,25 @@
 const AUTO_SUBJECT_RE =
   /^\s*(?:(?:re|fwd?|aw|sv)\s*:\s*)*(automatic reply|auto[\s-]?reply|autoreply|out of (?:the )?office|out-of-office|\booo\b|away from (?:the )?office|on vacation|on holiday|abwesenheit(?:snotiz)?|automatische antwort|r[ée]ponse automatique|absence du bureau|respuesta autom[áa]tica|autorespuesta|risposta automatica|automatisch antwoord|fr[åa]nvaro|autosvar)\b/i;
 
+// Unambiguous machine-mail phrases matched ANYWHERE in the subject, not just at
+// the start. AP-intake / capture systems put their own label first, so the
+// anchored rule above misses them -- e.g. Concur's "Concur Auto Reply Invoice
+// INV-0419 ..." which looped Maxwell into replying to a no-reply bot
+// (2026-06-25). These phrases are machine-only enough to be safe unanchored;
+// not replying is the safe failure mode anyway.
+const AUTO_SUBJECT_ANYWHERE_RE =
+  /\b(?:auto[\s-]?reply|automatic reply|automated (?:reply|response|message|notification|email)|do[\s-]?not[\s-]?reply|invoice capture)\b/i;
+
 // System senders it is never correct to reply to.
 const NOREPLY_SENDER_RE =
-  /^(?:no-?reply|do-?not-?reply|donotreply|noreply|mailer-daemon|postmaster|bounce[sd]?|mail-?delivery|microsoftexchange[\w-]*)@/i;
+  /^(?:no-?reply|do-?not-?reply|donotreply|noreply|mailer-daemon|postmaster|bounce[sd]?|mail-?delivery|microsoftexchange[\w-]*|invoice-?capture|auto-?reply|autoreply|autonotification|automated|notifications?)@/i;
+
+// Domains whose mail is system-generated end to end (AP-intake / expense-capture
+// acknowledgements). We never hold a human conversation with these, so never
+// auto-reply -- replying loops with their bot. Concur invoice-capture
+// (concursolutions.com) is the first member; add new AP-intake systems here.
+const AUTO_SENDER_DOMAIN_RE =
+  /@(?:[\w-]+\.)*(?:concursolutions\.com|concur\.com)$/i;
 
 /**
  * Normalize Graph internetMessageHeaders (array of {name,value}) or a plain
@@ -100,11 +116,14 @@ export function isAutomaticReply(email = {}) {
   if (/\b(bulk|auto_reply|auto-reply|list|junk)\b/.test(precedence)) reasons.push(`precedence=${precedence}`);
 
   // Subject heuristic (covers Outlook OOO + common locales).
-  if (AUTO_SUBJECT_RE.test(String(email.subject || ""))) reasons.push("subject");
+  const subject = String(email.subject || "");
+  if (AUTO_SUBJECT_RE.test(subject)) reasons.push("subject");
+  else if (AUTO_SUBJECT_ANYWHERE_RE.test(subject)) reasons.push("subject-anywhere");
 
-  // System sender heuristic.
+  // System sender heuristic (no-reply local-part, or a known AP-intake domain).
   const from = extractAddress(email.from || email.fromAddress || email.sender);
   if (from && NOREPLY_SENDER_RE.test(from)) reasons.push(`sender=${from}`);
+  else if (from && AUTO_SENDER_DOMAIN_RE.test(from)) reasons.push(`auto-domain=${from}`);
 
   return { isAuto: reasons.length > 0, reason: reasons.join(",") };
 }
