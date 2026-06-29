@@ -37,6 +37,26 @@ const DEFAULT_MAX_FILES = 6;
 const PER_FILE_MAX_BYTES = 10 * 1024 * 1024;
 const TOTAL_HARD_BYTES = 25 * 1024 * 1024;
 
+// Inline attachments are usually signature logos, social icons, and tracking
+// pixels, which we skip. But a screenshot pasted into the email body is ALSO an
+// inline image (cid-referenced), and that is real content we must read. Size is
+// the cheap discriminator: logos/icons/pixels are small, a screenshot is not.
+// An inline image at or above this many bytes is treated as readable content.
+const INLINE_IMAGE_MIN_BYTES = 10 * 1024;
+
+/**
+ * Decide whether an inline attachment is real content (a pasted screenshot) vs
+ * decorative chrome (signature logo, social icon, tracking pixel). Keep inline
+ * images at or above the size floor; skip everything else inline.
+ * @param {object} a - Graph attachment summary (has contentType, name, size)
+ * @returns {boolean}
+ */
+function inlineWorthReading(a) {
+  const mime = cleanMime(a.contentType) || mimeFromName(a.name);
+  if (!mime.startsWith("image/")) return false;
+  return (a.size || 0) >= INLINE_IMAGE_MIN_BYTES;
+}
+
 // Filename-extension -> mime, used when Graph reports application/octet-stream
 // (DMARC reports and many gzip/zip parts arrive that way) or no contentType.
 const EXT_MIME = {
@@ -272,7 +292,8 @@ async function expandItemAttachment(env, graphJson, messageId, att, acc) {
 
   for (const na of item.attachments || []) {
     if (acc.blocks.length >= acc.maxFiles) break;
-    if (na["@odata.type"] !== "#microsoft.graph.fileAttachment" || na.isInline || !na.contentBytes) continue;
+    if (na["@odata.type"] !== "#microsoft.graph.fileAttachment" || !na.contentBytes) continue;
+    if (na.isInline && !inlineWorthReading(na)) continue; // keep pasted screenshots, drop logos
     await pushFileBlocks(env, na.name || "attachment", na.contentType, base64ToBytes(na.contentBytes), acc);
   }
 }
@@ -312,7 +333,8 @@ export async function buildEmailAttachmentBlocks(env, graphJson, messageId, opts
       continue;
     }
     if (odataType !== "#microsoft.graph.fileAttachment") continue;
-    if (a.isInline) continue; // signature logos etc.
+    // Inline: keep a pasted screenshot, skip signature logos / icons / pixels.
+    if (a.isInline && !inlineWorthReading(a)) continue;
 
     // Graph omits contentBytes from the list response for larger attachments;
     // fetch the single attachment to get the bytes.
