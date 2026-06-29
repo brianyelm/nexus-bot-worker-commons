@@ -609,8 +609,15 @@ export async function settleHitlCard(env, messageId, params = {}, options = {}) 
     sections: [],
     ...(footer ? { footer } : {}),
   });
-  await editNexusMessage(env, messageId, body, options).catch(() => {});
-  return settleMessageComponents(env, messageId, options);
+  // Atomic edit + component clear in a SINGLE PATCH (clear_components:true).
+  // Server-side this rewrites the body, deletes the buttons + modal triggers,
+  // then broadcasts broadcast_update followed in-order by a settled:true frame
+  // so the client cannot re-seed a stale Edit modal. The old pattern -- edit,
+  // then a separate settleMessageComponents -- fired two independent requests
+  // whose broadcasts could arrive out of order: the body-edit broadcast still
+  // carried the old modal rows and re-seeded a live "Edit reply" trigger on a
+  // resolved card if it landed after the settle. Do NOT split these back apart.
+  return editNexusMessage(env, messageId, body, { ...options, clearComponents: true });
 }
 
 /**
