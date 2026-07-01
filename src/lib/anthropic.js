@@ -191,6 +191,12 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
   const body = {
     model,
     max_tokens: options.maxTokens || MAX_TOKENS,
+    // Sonnet 5 / Opus 4.7+ default to adaptive thinking when `thinking` is
+    // omitted, which silently adds latency + token cost on chat/structured
+    // paths that never wanted it. Pin disabled by default; a caller opts a
+    // specific job into adaptive by passing options.thinking. No-op on the
+    // Haiku/Sonnet-4.6 paths that already ran thinking-off. (2026-07-01 fleet bump.)
+    thinking: options.thinking || { type: "disabled" },
     system: [
       {
         type: "text",
@@ -257,6 +263,9 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
   const baseParams = {
     model,
     max_tokens: options.maxTokens || MAX_TOKENS,
+    // Pin thinking disabled by default (see callAnthropic note). Opt a job into
+    // adaptive via options.thinking. No-op on Haiku/Sonnet-4.6 paths. (2026-07-01)
+    thinking: options.thinking || { type: "disabled" },
     system: [
       {
         type: "text",
