@@ -1701,7 +1701,7 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
       lastMsg.content = [...wcGifBlocks, { type: "text", text: focusNote }];
     }
 
-    const wcCallOpts = { model: "claude-sonnet-4-6", maxTokens: 250 };
+    const wcCallOpts = { model: "claude-sonnet-5", maxTokens: 250 }; // 2026-07-01 fleet bump; callAnthropic defaults thinking:disabled
     let response;
     try {
       response = await callAnthropic(env, fullSystemPrompt, messages, wcCallOpts);
