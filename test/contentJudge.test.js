@@ -75,7 +75,11 @@ test("buildRetryFeedback returns empty string when nothing to fix", () => {
 });
 
 test("FLEET_RUBRICS covers every launch surface", () => {
-  for (const key of ["cold-email", "b2b-followup", "newsletter", "meeting-recap", "client-report"]) {
+  const surfaces = [
+    "cold-email", "b2b-followup", "newsletter", "meeting-recap", "client-report",
+    "morphora-quote", "linkedin-post", "jimifalls-captions",
+  ];
+  for (const key of surfaces) {
     assert.ok(typeof FLEET_RUBRICS[key] === "string" && FLEET_RUBRICS[key].length > 100, `missing rubric: ${key}`);
   }
 });

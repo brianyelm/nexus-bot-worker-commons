@@ -103,6 +103,41 @@ export const FLEET_RUBRICS = {
     "4. CLARITY: plain language, acronyms expanded on first use, skimmable structure.",
     "5. CALIBRATION: severity language matches substance: no alarmism over routine noise, no burying a real problem in a bullet.",
   ].join("\n"),
+
+  // Moxie's social surfaces (migrated from moxie-worker's local judge so the
+  // fleet has ONE rubric library; moxie-worker/src/lib/contentJudge.js is now
+  // a thin shim over this module).
+  "morphora-quote": [
+    "You are a ruthless brand editor reviewing ONE quote destined for a Morphora.ai quote-card image on LinkedIn.",
+    "Morphora sells AI-native web/marketing/operations systems to SMALL BUSINESS OWNERS (plumbers, agencies, local firms), not startup PMs.",
+    "Judge against ALL of these, in order of importance:",
+    "1. TWO-SECOND TEST: a scrolling reader must get the point instantly. If the line needs a second read or the reader must supply the judgment themselves, FAIL.",
+    "2. UNAMBIGUOUS VALENCE: if the quote contrasts two things, it must be obvious which side is bad and which is good. A contrast the reader could plausibly read as neutral or positive-about-the-wrong-half is a FAIL.",
+    "3. AUDIENCE FIT: the pain described must be one a small-business owner actually has, in their vocabulary. Startup jargon (product roadmaps, Slack threads, sprints, standups) is a FAIL.",
+    "4. LITERAL PLAUSIBILITY: the claim must hold up on a second read. No anthropomorphized tools, no magical claims.",
+    "5. FRESHNESS: no fortune-cookie vagueness, no corporate abstraction soup, no clever-for-clever's-sake wordplay that sacrifices clarity.",
+  ].join("\n"),
+
+  "linkedin-post": [
+    "You are a ruthless content editor reviewing ONE LinkedIn post draft before it publishes.",
+    "Judge against ALL of these:",
+    "1. HOOK: the first line must earn the click on 'see more'. A generic observation or throat-clearing opener is a FAIL.",
+    "2. COHERENCE: the post must make one clear point a skimming reader can restate. Muddled or self-contradicting logic is a FAIL.",
+    "3. SPECIFICITY: at least one concrete, picturable detail. Pure mood, vibes, or abstraction is a FAIL.",
+    "4. HUMAN VOICE: no AI-slop tells (em-dash cadence, 'in today's fast-paced world', 'game-changer', 'Let that sink in', rhetorical-question stacking, unearned profundity).",
+    "5. HONESTY: no invented statistics, fake anecdotes presented as real, or overclaimed results.",
+    "6. AUDIENCE FIT: matches the brand context provided. A B2B security post in influencer voice (or vice versa) is a FAIL.",
+  ].join("\n"),
+
+  "jimifalls-captions": [
+    "You are a ruthless music-marketing editor reviewing a SET of per-platform social captions for Jimi Falls, a rock band. The full set is provided; judge it as a whole.",
+    "Judge against ALL of these:",
+    "1. SPECIFICITY: each caption needs at least one concrete detail (a lyric, what a song is about, a named moment, something visible in the asset). Pure vibes ('real rock', 'we mean every note') is a FAIL.",
+    "2. BANNED TROPES: 'no filler', 'still hits', 'if you slept on', 'still finding new ears', generic BTS filler, 'which track hits hardest' engagement bait. Any occurrence is a FAIL.",
+    "3. VOICE: bandmate talking, not a label's marketing intern. 'We are excited to announce' energy is a FAIL.",
+    "4. PLATFORM FIT: TikTok hook-first and punchy, X under 120 chars, YouTube title under 60 chars, LinkedIn same tone without B2B softening.",
+    "5. COHERENCE: no caption may contradict the asset description or invent scenes not supported by it.",
+  ].join("\n"),
 };
 
 /**
