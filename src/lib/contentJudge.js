@@ -1,5 +1,5 @@
 // =============================================================================
-// lib/contentJudge.js -- fleet-shared LLM quality gate for drafted content.
+// lib/contentJudge.js: fleet-shared LLM quality gate for drafted content.
 //
 // Why this exists: regex/heuristic output guards catch REPETITION and FORMAT
 // problems but never INCOHERENCE. "Half your product roadmap lives in Slack
@@ -14,7 +14,7 @@
 //   const verdict = await judgeContent(env, { surface: "cold-email", content, context });
 //   if (!verdict.pass) {
 //     prompt += buildRetryFeedback(verdict);   // regenerate with the objections
-//     // on final failure: HOLD / demote to HITL -- never auto-send a failed draft
+//     // on final failure: HOLD / demote to HITL: never auto-send a failed draft
 //   }
 //
 // Semantics every consumer must preserve:
@@ -33,7 +33,7 @@ import { callAnthropic } from "./anthropic.js";
 export const JUDGE_PASS_THRESHOLD = 7;
 
 // Judge-call retries: the 14:48 UTC fleet flood briefly 429/529s the shared
-// AI Gateway, and a judge error fails OPEN (content ships ungated) -- so the
+// AI Gateway, and a judge error fails OPEN (content ships ungated): so the
 // judge itself retries transient failures before giving up.
 const JUDGE_ATTEMPTS = 3;
 const JUDGE_BACKOFF_MS = 800;
@@ -86,7 +86,7 @@ export const FLEET_RUBRICS = {
   "meeting-recap": [
     "You are a ruthless editor reviewing ONE meeting recap email before it mails to attendees who may include EXTERNAL clients.",
     "Judge against ALL of these:",
-    "1. COMPLETENESS SMELL: the recap must read as a finished document -- no truncation mid-thought, no sections that trail off, no obviously missing halves (e.g. action items header with no items).",
+    "1. COMPLETENESS SMELL: the recap must read as a finished document: no truncation mid-thought, no sections that trail off, no obviously missing halves (e.g. action items header with no items).",
     "2. EXTERNAL-SAFE: no internal-only candor, pricing speculation, personnel commentary, or meta-commentary about the AI/tooling ('the transcript was unclear'). Anything embarrassing in front of a client is a FAIL.",
     "3. GROUNDED: statements must read as summaries of the provided material, not editorializing or invented commitments. Attribute decisions and owners only where stated.",
     "4. STRUCTURE: clear summary, decisions, and action items (with owners where given); skimmable.",
@@ -100,7 +100,7 @@ export const FLEET_RUBRICS = {
     "2. GROUNDED: narrative claims must match the provided data/context; no invented metrics, trends, or causes.",
     "3. ACTIONABILITY: findings state what they mean and what (if anything) the reader should do; a wall of raw observations is a FAIL.",
     "4. CLARITY: plain language, acronyms expanded on first use, skimmable structure.",
-    "5. CALIBRATION: severity language matches substance -- no alarmism over routine noise, no burying a real problem in a bullet.",
+    "5. CALIBRATION: severity language matches substance: no alarmism over routine noise, no burying a real problem in a bullet.",
   ].join("\n"),
 };
 
@@ -146,7 +146,7 @@ export function buildRetryFeedback(verdict) {
   if (!issues.length) return "";
   return [
     "",
-    `EDITOR REJECTION (your previous draft scored ${verdict.score}/10 and was rejected -- fix EVERY issue below, do not just reword):`,
+    `EDITOR REJECTION (your previous draft scored ${verdict.score}/10 and was rejected: fix EVERY issue below, do not just reword):`,
     ...issues.map((i) => `- ${i}`),
   ].join("\n");
 }
@@ -163,7 +163,7 @@ function sleep(ms) {
  * failure always comes back with skipped: false.
  *
  * Model resolution: params.model > env.JUDGE_MODEL > env.CLAUDE_MODEL >
- * claude-sonnet-5. Keep the judge on a Sonnet-class model -- a fast model
+ * claude-sonnet-5. Keep the judge on a Sonnet-class model: a fast model
  * grading a fast model is how the problem started.
  *
  * @param {object} env - CF env bindings
