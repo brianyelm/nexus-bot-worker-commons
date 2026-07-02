@@ -59,8 +59,9 @@ export const FLEET_RUBRICS = {
     "2. NO FABRICATION: no invented dates, quarters, deadlines, fake urgency ('limited slots'), fabricated mutual contacts, or claimed prior conversations that are not in the provided context. Any invented specific is a FAIL.",
     "3. PLACEHOLDER LEAKAGE: any template artifact ({{first_name}}, [Company], TBD, lorem) is an instant FAIL.",
     "4. ONE CLEAR ASK: exactly one low-friction call to action. Multiple asks or a vague 'thoughts?' is a FAIL.",
-    "5. GROUNDING: every specific claim about the recipient or their company must come from the provided context, not be plausible-sounding guesswork.",
+    "5. GROUNDING: every specific FACTUAL claim about the recipient or their company must come from the provided context. Industry-typical pain points framed as informed observations (not asserted as facts about this specific company) are acceptable and normal in cold outreach.",
     "6. LENGTH & TONE: skimmable in under 30 seconds, professional but not stiff, no spam-trigger hype ('revolutionary', 'game-changing').",
+    "NOT failures (house conventions, do not penalize): a soft availability ask like 'in the next week or so' (that is the standard CTA, not fabricated urgency); referencing a prior email as 'recently' or 'my note from earlier' on follow-up steps (the sequence is real); a brief mention of the sender's AI/automation capability alongside the main hook (a house requirement) as long as it is woven in naturally rather than a bolted-on second pitch.",
   ].join("\n"),
 
   "b2b-followup": [
