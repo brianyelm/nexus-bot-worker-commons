@@ -7,28 +7,62 @@
 // the upstream prompt told the model not to produce them; LLMs leak.
 // =============================================================================
 
+// Segments the scrubber must never rewrite: fenced code blocks (including an
+// unterminated trailing fence in streamed/partial text), inline code spans,
+// and HTML <pre>/<code> bodies in email HTML. Splitting on ONE capture group
+// puts protected segments at the odd indices of String.split's result.
+const PROTECTED_SEGMENT_RE =
+  /(```[\s\S]*?(?:```|$)|`[^`\n]+`|<pre\b[\s\S]*?<\/pre>|<code\b[\s\S]*?<\/code>)/gi;
+
+/**
+ * Rewrite the dash tells inside one prose (non-code) segment. See
+ * scrubFleetDashes for the full rules. Kept separate so the code-fence
+ * splitter can apply it to prose segments only.
+ *
+ * @param {string} segment
+ * @returns {string}
+ */
+function scrubDashProse(segment) {
+  return segment
+    .replace(/\s*[—―]\s*/g, ", ")
+    .replace(/\s*(?:&mdash;|&#8212;|&#x2014;|&horbar;|&#8213;)\s*/gi, ", ")
+    .replace(/ +-{2} +/g, ", ")
+    .replace(/(?<=\d)-{2}(?=\d)/g, "-")
+    .replace(/(?<=[A-Za-z])-{2}(?=[A-Za-z])/g, ", ")
+    .replace(/[–‒]/g, "-")
+    .replace(/(?:&ndash;|&#8211;|&#x2013;)/gi, "-")
+    .replace(/,\s*,/g, ",");
+}
+
 /**
  * Replace em-dashes (U+2014), en-dashes (U+2013), AND the ASCII double-hyphen
- * pause ( -- ) with forms a human would naturally type. Em-dash and a spaced
- * "--" both collapse surrounding whitespace into a single ", " so
- * "alpha - beta", "alpha-beta", and "alpha -- beta" all become "alpha, beta"
- * (not "alpha ,  beta"). En-dash becomes "-" (numeric range formatting works
- * either way).
+ * dash substitute with forms a human would naturally type. The fleet rule
+ * (2026-07-02, "Operation Dash Genocide") bans all three outright; the model
+ * is told not to produce them AND this scrubber rewrites any that leak.
  *
- * The " -- " rule exists because the fleet's "no em/en dash" instruction made
- * the models reach for a double-hyphen as a substitute, which is its own
- * tell. A spaced "--" is the dash-as-pause; separate clauses with a comma like
- * a person does. We require whitespace on BOTH sides so CLI flags (--skip),
- * ranges (2024--2025), and option lists are left untouched.
+ * Rules, applied to prose only:
+ *   - Em-dash (and &mdash; / &#8212; / &#x2014;): collapses with surrounding
+ *     whitespace into ", " so "alpha - beta" and "alpha-beta" both become
+ *     "alpha, beta" (not "alpha ,  beta").
+ *   - En-dash (and &ndash; / &#8211; / &#x2013;): becomes "-" (ranges read
+ *     fine either way).
+ *   - Spaced double-hyphen pause ("alpha -- beta"): becomes ", ".
+ *   - Unspaced double-hyphen between digits ("2024--2025"): becomes a single
+ *     hyphen (a range, not a pause).
+ *   - Unspaced double-hyphen between letters ("alpha--beta"): becomes ", ".
+ *   - Adjacent commas from chained replacements are collapsed.
  *
- * Also handles the common HTML entity forms (&mdash;, &ndash;, &#8212;,
- * &#8211;) so HTML email bodies are scrubbed correctly before MIME assembly.
- * Adjacent commas from chained replacements are collapsed.
+ * Never rewritten (functional double hyphens):
+ *   - CLI flags (--skip-tests): the hyphens follow whitespace, not a letter.
+ *   - Fenced code blocks, inline code spans, and HTML <pre>/<code> bodies:
+ *     excluded wholesale so SQL comments, git separators, and pasted shell
+ *     commands survive verbatim.
+ *   - Hyphen runs of 3+ (markdown horizontal rules, ASCII art): no rule
+ *     matches exactly-two hyphens inside a longer run.
  *
  * Why: em/en dashes and "--" are a dead giveaway that text came from an LLM.
  * Office workers rarely type them; their presence in an email / voice line /
- * Nexus post makes the bot legible as a bot. The fleet rule is to strip them
- * at every human-facing seam.
+ * Nexus post makes the bot legible as a bot. Strip them at every seam.
  *
  * Non-strings pass through untouched so this is safe to call on any value.
  *
@@ -37,13 +71,11 @@
  */
 export function scrubFleetDashes(text) {
   if (typeof text !== "string") return text;
-  return text
-    .replace(/\s*—\s*/g, ", ")
-    .replace(/\s*(?:&mdash;|&#8212;)\s*/gi, ", ")
-    .replace(/ +-- +/g, ", ")
-    .replace(/–/g, "-")
-    .replace(/(?:&ndash;|&#8211;)/gi, "-")
-    .replace(/,\s*,/g, ",");
+  const parts = text.split(PROTECTED_SEGMENT_RE);
+  for (let i = 0; i < parts.length; i += 2) {
+    parts[i] = scrubDashProse(parts[i]);
+  }
+  return parts.join("");
 }
 
 // -----------------------------------------------------------------------------
@@ -141,16 +173,24 @@ export function detectBareCapsHeader(text) {
 }
 
 /**
- * True if the text contains any em-dash (U+2014) or en-dash (U+2013) --
- * after scrubFleetDashes has already run, this should always be false. A
- * hit means a code path bypassed the sanitizer.
+ * True if the text contains any em-dash (U+2014), en-dash (U+2013), or a
+ * prose double-hyphen (spaced pause or letter-to-letter). After
+ * scrubFleetDashes has already run, this should always be false. A hit means
+ * a code path bypassed the sanitizer. Code fences / inline code / HTML
+ * pre+code bodies are ignored, matching the scrubber's protected segments.
  *
  * @param {string} text
  * @returns {boolean}
  */
 export function detectEmDashLeak(text) {
   if (typeof text !== "string") return false;
-  return /[–—]/.test(text);
+  if (/[–—‒―]/.test(text)) return true;
+  const parts = text.split(PROTECTED_SEGMENT_RE);
+  for (let i = 0; i < parts.length; i += 2) {
+    if (/ -{2} /.test(parts[i])) return true;
+    if (/(?<=[A-Za-z])-{2}(?=[A-Za-z])/.test(parts[i])) return true;
+  }
+  return false;
 }
 
 /**

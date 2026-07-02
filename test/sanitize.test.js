@@ -75,11 +75,66 @@ test("scrubFleetDashes replaces a spaced double-hyphen pause with comma-space", 
   assert.equal(scrubFleetDashes("Owner -- email sent"), "Owner, email sent");
 });
 
-test("scrubFleetDashes leaves CLI flags, ranges, and bare hyphens alone", () => {
-  // Only a double-hyphen with whitespace on BOTH sides is the dash-as-pause.
+test("scrubFleetDashes leaves CLI flags and bare hyphens alone", () => {
   assert.equal(scrubFleetDashes("npm run deploy -- --skip-tests"), "npm run deploy, --skip-tests");
-  assert.equal(scrubFleetDashes("2024--2025"), "2024--2025");
+  assert.equal(scrubFleetDashes("run with --skip-tests today"), "run with --skip-tests today");
   assert.equal(scrubFleetDashes("well-known config"), "well-known config");
+});
+
+test("scrubFleetDashes rewrites unspaced double-hyphens in prose", () => {
+  // Letter-to-letter is the dash-as-pause tell.
+  assert.equal(scrubFleetDashes("alpha--beta"), "alpha, beta");
+  // Digit-to-digit is a range: single hyphen.
+  assert.equal(scrubFleetDashes("2024--2025"), "2024-2025");
+});
+
+test("scrubFleetDashes handles figure dash and horizontal bar", () => {
+  assert.equal(scrubFleetDashes("alpha ― beta"), "alpha, beta");
+  assert.equal(scrubFleetDashes("pages 3‒7"), "pages 3-7");
+  assert.equal(detectEmDashLeak("alpha ― beta"), true);
+});
+
+test("scrubFleetDashes leaves hyphen runs of 3+ alone", () => {
+  assert.equal(scrubFleetDashes("---"), "---");
+  assert.equal(scrubFleetDashes("a---b"), "a---b");
+  assert.equal(scrubFleetDashes("----------"), "----------");
+});
+
+test("scrubFleetDashes never rewrites inside code fences or inline code", () => {
+  const fenced = "before — text\n```sql\nSELECT 1; -- a comment\n```\nafter -- text";
+  assert.equal(
+    scrubFleetDashes(fenced),
+    "before, text\n```sql\nSELECT 1; -- a comment\n```\nafter, text"
+  );
+  assert.equal(
+    scrubFleetDashes("run `git log -- path` then stop -- now"),
+    "run `git log -- path` then stop, now"
+  );
+  // Unterminated fence (streamed/partial text) is still protected.
+  assert.equal(
+    scrubFleetDashes("intro -- pause\n```\ngit checkout -- ."),
+    "intro, pause\n```\ngit checkout -- ."
+  );
+});
+
+test("scrubFleetDashes never rewrites inside HTML pre/code bodies", () => {
+  assert.equal(
+    scrubFleetDashes("<p>note — here</p><pre>flag -- kept</pre>"),
+    "<p>note, here</p><pre>flag -- kept</pre>"
+  );
+  assert.equal(
+    scrubFleetDashes("<code>x -- y</code> but prose -- scrubbed"),
+    "<code>x -- y</code> but prose, scrubbed"
+  );
+});
+
+test("detectEmDashLeak flags prose double-hyphens but not code or flags", () => {
+  assert.equal(detectEmDashLeak("stop -- now"), true);
+  assert.equal(detectEmDashLeak("alpha--beta"), true);
+  assert.equal(detectEmDashLeak("run with --skip-tests"), false);
+  assert.equal(detectEmDashLeak("```\nSELECT 1; -- comment\n```"), false);
+  assert.equal(detectEmDashLeak("`git log -- path`"), false);
+  assert.equal(detectEmDashLeak("---"), false);
 });
 
 test("scrubFleetDashes passes through non-strings", () => {

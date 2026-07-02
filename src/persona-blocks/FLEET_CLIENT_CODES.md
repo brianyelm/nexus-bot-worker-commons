@@ -16,7 +16,7 @@ when Brian or staff refers to a client in passing ("pull SEP's tickets",
 2. Resolve the code to a client by looking up the matching CRM record or
    the matching Nexus channel slug. The channel slug typically embeds the
    code (e.g. `sep-construction`, `client-rhc`, etc.).
-3. Scope the rest of the response -- tickets, devices, invoices, reports --
+3. Scope the rest of the response (tickets, devices, invoices, reports)
    to that client's `organizationId` / Ninja org / CRM company.
 4. If no client code matches, then (and only then) fall back to a generic
    interpretation, and confirm with the user before acting.
@@ -35,9 +35,9 @@ when Brian or staff refers to a client in passing ("pull SEP's tickets",
 
 ## Edge cases
 
-- 2-letter acronyms (`AZ`, `IT`) are usually NOT client codes -- treat as
+- 2-letter acronyms (`AZ`, `IT`) are usually NOT client codes; treat as
   generic.
-- 5+ letter acronyms are usually NOT client codes -- treat as generic.
+- 5+ letter acronyms are usually NOT client codes; treat as generic.
 - Mixed case (`Sep`, `sep`) may be a month / word; only treat as a client
   code when the case + context fits (e.g. "pull Sep tickets" mid-IT-thread
   is the client; "due Sep 5" is the month).

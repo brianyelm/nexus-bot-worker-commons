@@ -49,9 +49,11 @@ test("postToNexus handles mixed em and en dashes", async () => {
   assert.equal(sent.body, "title, pages 3-7");
 });
 
-test("postToNexus leaves ASCII hyphens alone", async () => {
+test("postToNexus scrubs prose double-hyphens, leaves single hyphens and flags", async () => {
   const sent = await captureBody("double--hyphen and single-hyphen");
-  assert.equal(sent.body, "double--hyphen and single-hyphen");
+  assert.equal(sent.body, "double, hyphen and single-hyphen");
+  const flags = await captureBody("run wrangler deploy --dry-run first");
+  assert.equal(flags.body, "run wrangler deploy --dry-run first");
 });
 
 test("postToNexus passes through dash-free content unchanged", async () => {

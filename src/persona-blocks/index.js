@@ -1,5 +1,5 @@
 // =============================================================================
-// persona-blocks -- canonical text blocks injected into each bot's system prompt.
+// persona-blocks: canonical text blocks injected into each bot's system prompt.
 //
 // FLEET_OUTPUT_STYLE: fleet-wide output formatting style guide.
 // FLEET_CLIENT_CODES: convention for resolving 3-4 letter acronyms to CRM
@@ -13,7 +13,7 @@
 // wrangler.toml must declare this rule (most already do; see courtney-worker
 // and moxie-worker for the canonical pattern).
 //
-// Node tests do NOT exercise this entry point -- .md imports are wrangler-only.
+// Node tests do NOT exercise this entry point; .md imports are wrangler-only.
 // Tests import directly from src/lib/*.js.
 // =============================================================================
 
