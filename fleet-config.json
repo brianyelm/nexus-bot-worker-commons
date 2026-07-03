@@ -1,5 +1,5 @@
 {
-  "CLAUDE_MODEL": "claude-sonnet-4-6",
+  "CLAUDE_MODEL": "claude-sonnet-5",
   "M365_TENANT_ID": "cfd2f2a1-158f-400e-ae14-ac8ca8086d6b",
   "ALLOWED_DOMAIN": "blackravenit.com",
   "S1_ACCOUNT_ID": "2403937513844951240",
