@@ -55,7 +55,7 @@ async function crmGet(env, path) {
     try {
       const t = await res.text();
       if (t) detail = " " + t.slice(0, 300);
-    } catch {}
+    } catch { /* body read is best-effort; the status error is thrown regardless */ }
     const err = new Error(`CRM GET ${path} ${res.status} ${res.statusText}${detail}`);
     err.status = res.status;
     throw err;

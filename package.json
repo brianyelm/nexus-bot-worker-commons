@@ -39,7 +39,8 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node scripts/check-dashes.mjs src/persona-blocks && node --test \"test/**/*.test.js\""
+    "test": "node scripts/check-dashes.mjs src/persona-blocks && node scripts/check-empty-catch.mjs --strict src && node --test \"test/**/*.test.js\"",
+    "check:empty-catch": "node scripts/check-empty-catch.mjs src"
   },
   "engines": {
     "node": ">=20"
