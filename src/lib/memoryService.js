@@ -16,13 +16,23 @@ import { buildMemoryAuthHeaders } from './memoryAuth.js';
 
 const BOT_HEADER = 'X-Memory-Bot';
 
-async function memoryFetch(env, botId, path, body) {
+// opts.audience ('internal'|'external') tags a WRITE; opts.scope ('all'|'external')
+// selects a READ view. Both are omitted by default, so the memory-worker applies
+// its fail-safe defaults (write=internal, read=external). See migration 003.
+function audienceHeaders(opts) {
+  const h = {};
+  if (opts?.audience) h['X-Memory-Audience'] = opts.audience;
+  if (opts?.scope) h['X-Memory-Scope'] = opts.scope;
+  return h;
+}
+
+async function memoryFetch(env, botId, path, body, opts) {
   if (!env.MEMORY) return null;
   try {
     const auth = await buildMemoryAuthHeaders(env, botId);
     const resp = await env.MEMORY.fetch(new Request(`https://internal${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', [BOT_HEADER]: botId, ...auth },
+      headers: { 'Content-Type': 'application/json', [BOT_HEADER]: botId, ...audienceHeaders(opts), ...auth },
       body: JSON.stringify(body),
     }));
     if (!resp.ok) {
@@ -36,13 +46,13 @@ async function memoryFetch(env, botId, path, body) {
   }
 }
 
-async function memoryGet(env, botId, path) {
+async function memoryGet(env, botId, path, opts) {
   if (!env.MEMORY) return null;
   try {
     const auth = await buildMemoryAuthHeaders(env, botId);
     const resp = await env.MEMORY.fetch(new Request(`https://internal${path}`, {
       method: 'GET',
-      headers: { [BOT_HEADER]: botId, ...auth },
+      headers: { [BOT_HEADER]: botId, ...audienceHeaders(opts), ...auth },
     }));
     if (!resp.ok) return null;
     return await resp.json();
@@ -65,7 +75,7 @@ async function memoryGet(env, botId, path) {
  * @param {string} params.assistantText - The bot's response
  * @param {string} [params.channel] - Channel name/slug
  */
-export async function persistTurnPair(env, botId, { sessionId, entityId, userText, assistantText, channel }) {
+export async function persistTurnPair(env, botId, { sessionId, entityId, userText, assistantText, channel }, opts) {
   if (!env.MEMORY) return;
   await memoryFetch(env, botId, '/turns', {
     session_id: sessionId,
@@ -73,14 +83,14 @@ export async function persistTurnPair(env, botId, { sessionId, entityId, userTex
     role: 'user',
     content: userText,
     channel,
-  });
+  }, opts);
   await memoryFetch(env, botId, '/turns', {
     session_id: sessionId,
     entity_id: entityId || null,
     role: 'assistant',
     content: assistantText,
     channel,
-  });
+  }, opts);
 }
 
 /**
@@ -101,7 +111,7 @@ export async function persistTurnPair(env, botId, { sessionId, entityId, userTex
  * @param {string} [params.type] - Entity type (default: 'contact')
  * @returns {Promise<string|null>} entity_id or null
  */
-export async function resolveEntity(env, botId, { userId, email, phone, displayName, type = 'contact' }) {
+export async function resolveEntity(env, botId, { userId, email, phone, displayName, type = 'contact' }, opts) {
   if (!env.MEMORY) return null;
   const externalIds = {};
   if (userId) externalIds.nexus_user_id = userId;
@@ -112,7 +122,7 @@ export async function resolveEntity(env, botId, { userId, email, phone, displayN
     type,
     display_name: displayName || userId || email || phone,
     external_ids: externalIds,
-  });
+  }, opts);
   return result?.id || null;
 }
 
@@ -125,12 +135,12 @@ export async function resolveEntity(env, botId, { userId, email, phone, displayN
  * @param {string} [query] - Optional query for semantic search
  * @returns {Promise<object|null>}
  */
-export async function getEntityContext(env, botId, entityId, query) {
+export async function getEntityContext(env, botId, entityId, query, opts) {
   if (!env.MEMORY) return null;
   return await memoryFetch(env, botId, '/context', {
     entity_id: entityId,
     query: query || undefined,
-  });
+  }, opts);
 }
 
 /**
@@ -163,7 +173,7 @@ export async function endMemorySession(env, botId, sessionId, summary) {
 /**
  * Assert a structured fact about an entity.
  */
-export async function assertFact(env, botId, { subjectId, predicate, object, confidence, sourceTurnId, critical, ttlDays }) {
+export async function assertFact(env, botId, { subjectId, predicate, object, confidence, sourceTurnId, critical, ttlDays }, opts) {
   if (!env.MEMORY) return null;
   return await memoryFetch(env, botId, '/facts', {
     subject_id: subjectId,
@@ -175,7 +185,7 @@ export async function assertFact(env, botId, { subjectId, predicate, object, con
     // (kept indefinitely); otherwise it applies the default 90-day retention.
     critical: critical === true ? true : undefined,
     ttl_days: Number(ttlDays) > 0 ? Number(ttlDays) : undefined,
-  });
+  }, opts);
 }
 
 /**

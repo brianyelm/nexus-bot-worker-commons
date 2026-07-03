@@ -43,11 +43,15 @@ export async function buildContactRecall(env, botId, contact = {}, query, opts =
   if (!userId && !email && !phone) return { entityId: null, block: "" };
   const maxFacts = opts.maxFacts ?? 20;
   const maxTurns = opts.maxTurns ?? 10;
+  // Forward the audience membrane opts (opts.audience for the entity write,
+  // opts.scope for the context read). Omitted => memory-worker fail-safe
+  // defaults (write=internal, read=external), which is client-safe.
+  const audOpts = { audience: opts.audience, scope: opts.scope };
 
   try {
-    const entityId = await resolveEntity(env, botId, { userId, email, phone, displayName });
+    const entityId = await resolveEntity(env, botId, { userId, email, phone, displayName }, audOpts);
     if (!entityId) return { entityId: null, block: "" };
-    const ctx = await getEntityContext(env, botId, entityId, query);
+    const ctx = await getEntityContext(env, botId, entityId, query, audOpts);
     if (!ctx) return { entityId, block: "" };
 
     const lines = [];

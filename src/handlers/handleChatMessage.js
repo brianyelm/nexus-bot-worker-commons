@@ -811,11 +811,18 @@ export async function runLlmPipeline({
     // the entity for future recall. Best-effort; no-op when MEMORY is unbound or
     // recall is disabled via config.memoryRecall = { enabled: false }.
     let memoryRecallBlock = "";
+    // Nexus chat is the INTERNAL staff surface (M365 SSO, blackravenit.com only),
+    // so it writes to the lowercase memory bucket tagged 'internal' and reads
+    // with staff scope 'all' (merged internal + external view). This is the one
+    // surface allowed to see internal memory; client-facing surfaces (email,
+    // phone) omit these opts and get the fail-safe external-only view.
+    const memBotId = (config.botName || "bot").toLowerCase();
+    const MEM_STAFF = { audience: "internal", scope: "all" };
     if (env.MEMORY && config.botName && config.memoryRecall?.enabled !== false) {
       try {
-        memEntityId = await resolveEntity(env, config.botName, { userId: user_id, email: user_email, displayName: display_name });
+        memEntityId = await resolveEntity(env, memBotId, { userId: user_id, email: user_email, displayName: display_name }, MEM_STAFF);
         if (memEntityId) {
-          const memCtx = await getEntityContext(env, config.botName, memEntityId, userText);
+          const memCtx = await getEntityContext(env, memBotId, memEntityId, userText, MEM_STAFF);
           memoryRecallBlock = buildMemoryRecallBlock(memCtx, historyKey);
         }
       } catch (err) {
@@ -1079,19 +1086,19 @@ export async function runLlmPipeline({
       let entityId = memEntityId;
       if (!entityId) {
         try {
-          entityId = await resolveEntity(env, config.botName, { userId: user_id, email: user_email, displayName: display_name });
+          entityId = await resolveEntity(env, memBotId, { userId: user_id, email: user_email, displayName: display_name }, MEM_STAFF);
         } catch { /* fall through */ }
       }
       if (!entityId) return { error: "Could not resolve who to remember this for." };
       const object = input?.subject ? `${String(input.subject).trim()}: ${factText}` : factText;
       try {
-        await assertFact(env, config.botName, {
+        await assertFact(env, memBotId, {
           subjectId: entityId,
           predicate: "note",
           object: object.slice(0, 500),
           confidence: 1,
           critical: input?.important === true,
-        });
+        }, MEM_STAFF);
         return {
           ok: true,
           remembered: object.slice(0, 200),
@@ -1331,13 +1338,13 @@ export async function runLlmPipeline({
   // Forward to centralized memory service (best-effort, no-op if MEMORY binding absent)
   if (env.MEMORY && config.botName) {
     try {
-      await persistTurnPair(env, config.botName, {
+      await persistTurnPair(env, memBotId, {
         sessionId: historyKey,
         entityId: memEntityId,
         userText: labeledUserText,
         assistantText: responseText,
         channel: channel_slug,
-      });
+      }, MEM_STAFF);
     } catch (err) {
       console.warn("[handleChatMessage] memory service persist:", err?.message);
     }
