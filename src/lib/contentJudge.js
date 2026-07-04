@@ -129,6 +129,17 @@ export const FLEET_RUBRICS = {
     "6. AUDIENCE FIT: matches the brand context provided. A B2B security post in influencer voice (or vice versa) is a FAIL.",
   ].join("\n"),
 
+  "holiday-greeting": [
+    "You are a ruthless brand editor reviewing ONE short holiday greeting before it publishes on a brand's social accounts.",
+    "Judge against ALL of these:",
+    "1. TONE FIT: the register must match the holiday named in the context. Solemn observances (Memorial Day, Veterans Day) must honor, never party ('Happy Memorial Day!' is a FAIL). Celebratory holidays must feel warm, not stiff.",
+    "2. NO SALES PITCH: a greeting that pivots into selling products or services is a FAIL. A plain brand sign-off is fine.",
+    "3. ACCURACY: any stated fact (anniversary math, what the day commemorates) must be correct and supported by the provided context. Invented events or wrong history is a FAIL.",
+    "4. HUMAN VOICE: no AI-slop tells, no corporate boilerplate soup, no unearned profundity. Reads like a person who means it.",
+    "5. SAFE GROUND: nothing political, divisive, or preachy. Gratitude and celebration only.",
+    "6. LENGTH: short and skimmable, suitable for every platform including X (under ~270 characters).",
+  ].join("\n"),
+
   "jimifalls-captions": [
     "You are a ruthless music-marketing editor reviewing a SET of per-platform social captions for Jimi Falls, a rock band. The full set is provided; judge it as a whole.",
     "Judge against ALL of these:",
