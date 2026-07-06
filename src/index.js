@@ -30,7 +30,7 @@ export { LlmRoomBase } from "./durable/LlmRoom.js";
 export { ReminderDOBase, scheduleReminderAlarm, bootstrapReminderAlarm } from "./durable/ReminderDOBase.js";
 export { handleCommandList, FOUNDATION_COMMAND_META } from "./handlers/handleCommandList.js";
 export { callAnthropic, callAnthropicWithTools } from "./lib/anthropic.js";
-export { judgeContent, parseJudgeVerdict, buildRetryFeedback, FLEET_RUBRICS, JUDGE_PASS_THRESHOLD } from "./lib/contentJudge.js";
+export { judgeContent, judgeContentWithRedraft, parseJudgeVerdict, buildRetryFeedback, FLEET_RUBRICS, JUDGE_PASS_THRESHOLD } from "./lib/contentJudge.js";
 export { buildActionBreadcrumb, summarizeToolCall, isReadonlyToolName, looksLikeUnbackedClaim } from "./lib/actionTrace.js";
 export { verifyNexusSignature, timingSafeEqual } from "./lib/callbackSign.js";
 export { parseCommand } from "./lib/commandParser.js";

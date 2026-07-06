@@ -265,3 +265,59 @@ export async function judgeContent(env, { surface, rubric, content, context = ""
   console.log(`[contentJudge] ${surface || "custom"}: ${verdict.pass ? "PASS" : "FAIL"} score=${verdict.score}${verdict.issues.length ? ` issues=${JSON.stringify(verdict.issues)}` : ""}`);
   return { ...verdict, skipped: false };
 }
+
+// Redraft budget: how many extra generate+judge cycles run after the first
+// judge before the loop gives up and hands the caller a still-failing verdict.
+// 2 means up to 3 judge passes total. Kept small: a draft the editor rejects
+// three times is not one more reword away from good, it is a HITL problem.
+const DEFAULT_MAX_REDRAFTS = 2;
+
+/**
+ * Closed-loop judge: judge the content and, on editorial failure, let the caller
+ * REDRAFT from the objections and re-judge, up to maxRedrafts extra cycles. This
+ * is the self-correcting form of judgeContent. Instead of a failed verdict going
+ * straight to HOLD/HITL (a human then re-drives), the generator gets the editor's
+ * objections fed back and tries again, so most rejections never reach a person.
+ *
+ * The redraft callback receives (currentContent, verdict, attempt) and returns
+ * the NEW content string to judge, regenerated with the objections addressed
+ * (feed buildRetryFeedback(verdict) into your generation prompt), or a falsy
+ * value to stop early. It is called only on a real editorial failure.
+ *
+ * Semantics preserved from judgeContent:
+ *   - Infra failure fails OPEN (skipped:true) and STOPS the loop immediately: a
+ *     transient Anthropic blip never triggers a redraft storm; content ships
+ *     exactly as the un-looped path would have.
+ *   - A passing verdict stops the loop. On persistent editorial failure the loop
+ *     exhausts its budget and returns the LAST content + verdict (pass:false);
+ *     the caller still owns the HOLD/HITL decision.
+ *
+ * @param {object} env - CF env bindings
+ * @param {object} params - judgeContent params plus loop controls
+ * @param {(content: string, verdict: object, attempt: number) => Promise<string>} params.redraft
+ * @param {number} [params.maxRedrafts=2] - extra generate+judge cycles after the first judge
+ * @returns {Promise<{content: string, verdict: object, redrafts: number}>}
+ */
+export async function judgeContentWithRedraft(env, { redraft, maxRedrafts = DEFAULT_MAX_REDRAFTS, ...judgeParams } = {}) {
+  let content = judgeParams.content;
+  let verdict = await judgeContent(env, { ...judgeParams, content });
+  let redrafts = 0;
+
+  while (!verdict.pass && !verdict.skipped && typeof redraft === "function" && redrafts < maxRedrafts) {
+    let revised;
+    try {
+      revised = await redraft(content, verdict, redrafts + 1);
+    } catch (err) {
+      console.warn(`[contentJudge] ${judgeParams.surface || "custom"}: redraft attempt ${redrafts + 1} threw, stopping loop:`, err.message);
+      break;
+    }
+    // Stop if the generator gave up, returned nothing, or could not change it.
+    if (!revised || !String(revised).trim() || revised === content) break;
+    redrafts += 1;
+    content = revised;
+    verdict = await judgeContent(env, { ...judgeParams, content });
+    console.log(`[contentJudge] ${judgeParams.surface || "custom"}: redraft ${redrafts} -> ${verdict.pass ? "PASS" : `FAIL(${verdict.score})`}`);
+  }
+
+  return { content, verdict, redrafts };
+}
