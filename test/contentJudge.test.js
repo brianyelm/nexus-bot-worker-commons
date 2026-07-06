@@ -8,9 +8,26 @@ import assert from "node:assert/strict";
 import {
   parseJudgeVerdict,
   buildRetryFeedback,
+  judgeContentWithRedraft,
   FLEET_RUBRICS,
   JUDGE_PASS_THRESHOLD,
 } from "../src/lib/contentJudge.js";
+
+// A scripted judge stub: returns the next queued verdict on each call, records
+// every content string it was asked to judge. Lets the redraft loop be tested
+// without a live Anthropic call (via the _judge injection seam).
+function stubJudge(verdicts) {
+  const seen = [];
+  let i = 0;
+  const judge = async (_env, { content }) => {
+    seen.push(content);
+    return verdicts[Math.min(i++, verdicts.length - 1)];
+  };
+  return { judge, seen };
+}
+const PASS = { pass: true, score: 9, issues: [], skipped: false };
+const FAIL = { pass: false, score: 3, issues: ["too vague"], skipped: false };
+const SKIP = { pass: true, score: 0, issues: [], skipped: true };
 
 test("parseJudgeVerdict parses a clean pass verdict", () => {
   assert.deepEqual(
@@ -82,4 +99,94 @@ test("FLEET_RUBRICS covers every launch surface", () => {
   for (const key of surfaces) {
     assert.ok(typeof FLEET_RUBRICS[key] === "string" && FLEET_RUBRICS[key].length > 100, `missing rubric: ${key}`);
   }
+});
+
+test("judgeContentWithRedraft: passes first try, never redrafts", async () => {
+  const { judge, seen } = stubJudge([PASS]);
+  let redraftCalls = 0;
+  const res = await judgeContentWithRedraft({}, {
+    surface: "meeting-recap", content: "clean draft",
+    redraft: async () => { redraftCalls++; return "should not run"; },
+    _judge: judge,
+  });
+  assert.equal(res.verdict.pass, true);
+  assert.equal(res.redrafts, 0);
+  assert.equal(redraftCalls, 0);
+  assert.deepEqual(seen, ["clean draft"]);
+});
+
+test("judgeContentWithRedraft: fails then a redraft fixes it", async () => {
+  const { judge, seen } = stubJudge([FAIL, PASS]);
+  const res = await judgeContentWithRedraft({}, {
+    surface: "meeting-recap", content: "leaky draft",
+    redraft: async (prev, verdict, attempt) => {
+      assert.equal(verdict.pass, false);
+      assert.equal(attempt, 1);
+      return "fixed draft";
+    },
+    _judge: judge,
+  });
+  assert.equal(res.verdict.pass, true);
+  assert.equal(res.content, "fixed draft");
+  assert.equal(res.redrafts, 1);
+  assert.deepEqual(seen, ["leaky draft", "fixed draft"]);
+});
+
+test("judgeContentWithRedraft: persistent failure exhausts the budget", async () => {
+  const { judge, seen } = stubJudge([FAIL]); // always fails
+  let attempts = 0;
+  const res = await judgeContentWithRedraft({}, {
+    surface: "meeting-recap", content: "v0",
+    maxRedrafts: 2,
+    redraft: async () => `v${++attempts}`,
+    _judge: judge,
+  });
+  assert.equal(res.verdict.pass, false);
+  assert.equal(res.redrafts, 2);          // 2 redrafts after the first judge
+  assert.equal(seen.length, 3);           // 1 initial + 2 re-judges
+  assert.deepEqual(seen, ["v0", "v1", "v2"]);
+});
+
+test("judgeContentWithRedraft: infra skip stops the loop immediately", async () => {
+  const { judge } = stubJudge([SKIP]);
+  let redraftCalls = 0;
+  const res = await judgeContentWithRedraft({}, {
+    surface: "meeting-recap", content: "draft",
+    redraft: async () => { redraftCalls++; return "x"; },
+    _judge: judge,
+  });
+  assert.equal(res.verdict.skipped, true);
+  assert.equal(res.verdict.pass, true);   // fail-open
+  assert.equal(res.redrafts, 0);
+  assert.equal(redraftCalls, 0);
+});
+
+test("judgeContentWithRedraft: a falsy or unchanged redraft stops the loop", async () => {
+  const { judge } = stubJudge([FAIL]);
+  const resNull = await judgeContentWithRedraft({}, {
+    surface: "meeting-recap", content: "draft",
+    redraft: async () => null,
+    _judge: judge,
+  });
+  assert.equal(resNull.redrafts, 0);
+  assert.equal(resNull.verdict.pass, false);
+
+  const { judge: judge2 } = stubJudge([FAIL]);
+  const resSame = await judgeContentWithRedraft({}, {
+    surface: "meeting-recap", content: "draft",
+    redraft: async () => "draft", // identical, no progress
+    _judge: judge2,
+  });
+  assert.equal(resSame.redrafts, 0);
+});
+
+test("judgeContentWithRedraft: no redraft callback degrades to a single judge pass", async () => {
+  const { judge, seen } = stubJudge([FAIL]);
+  const res = await judgeContentWithRedraft({}, {
+    surface: "meeting-recap", content: "draft",
+    _judge: judge,
+  });
+  assert.equal(res.verdict.pass, false);
+  assert.equal(res.redrafts, 0);
+  assert.deepEqual(seen, ["draft"]);
 });

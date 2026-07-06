@@ -296,11 +296,12 @@ const DEFAULT_MAX_REDRAFTS = 2;
  * @param {object} params - judgeContent params plus loop controls
  * @param {(content: string, verdict: object, attempt: number) => Promise<string>} params.redraft
  * @param {number} [params.maxRedrafts=2] - extra generate+judge cycles after the first judge
+ * @param {typeof judgeContent} [params._judge] - injectable judge (tests only; defaults to judgeContent)
  * @returns {Promise<{content: string, verdict: object, redrafts: number}>}
  */
-export async function judgeContentWithRedraft(env, { redraft, maxRedrafts = DEFAULT_MAX_REDRAFTS, ...judgeParams } = {}) {
+export async function judgeContentWithRedraft(env, { redraft, maxRedrafts = DEFAULT_MAX_REDRAFTS, _judge = judgeContent, ...judgeParams } = {}) {
   let content = judgeParams.content;
-  let verdict = await judgeContent(env, { ...judgeParams, content });
+  let verdict = await _judge(env, { ...judgeParams, content });
   let redrafts = 0;
 
   while (!verdict.pass && !verdict.skipped && typeof redraft === "function" && redrafts < maxRedrafts) {
@@ -315,7 +316,7 @@ export async function judgeContentWithRedraft(env, { redraft, maxRedrafts = DEFA
     if (!revised || !String(revised).trim() || revised === content) break;
     redrafts += 1;
     content = revised;
-    verdict = await judgeContent(env, { ...judgeParams, content });
+    verdict = await _judge(env, { ...judgeParams, content });
     console.log(`[contentJudge] ${judgeParams.surface || "custom"}: redraft ${redrafts} -> ${verdict.pass ? "PASS" : `FAIL(${verdict.score})`}`);
   }
 
