@@ -59,6 +59,7 @@ export { createLogger } from "./lib/logger.js";
 export { notifyEmailDown, BOT_HOME_CHANNELS } from "./lib/emailBackup.js";
 export { postApprovalCard, processButtonClick } from "./lib/hitl.js";
 export { postHitlCard, renderHitlCard } from "./lib/hitlCard.js";
+export { runSelfReviewLoop, handleSelfReviewLoopClick, recommendationFingerprint } from "./lib/selfReviewLoop.js";
 export {
   linkButton,
   linkButtons,
