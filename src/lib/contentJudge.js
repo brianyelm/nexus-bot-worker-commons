@@ -32,12 +32,6 @@ import { callAnthropic } from "./anthropic.js";
 // boolean; both must agree so a generous scorer cannot sneak a 6/10 through.
 export const JUDGE_PASS_THRESHOLD = 7;
 
-// Judge-call retries: the 14:48 UTC fleet flood briefly 429/529s the shared
-// AI Gateway, and a judge error fails OPEN (content ships ungated): so the
-// judge itself retries transient failures before giving up.
-const JUDGE_ATTEMPTS = 3;
-const JUDGE_BACKOFF_MS = 800;
-
 const JUDGE_OUTPUT_CONTRACT = [
   "OUTPUT CONTRACT (non-negotiable): reply with ONLY a raw JSON object, no markdown, no code fence, no prose:",
   '{"pass": <boolean>, "score": <integer 1-10>, "issues": ["<specific problem>", ...]}',
@@ -198,11 +192,6 @@ export function buildRetryFeedback(verdict) {
   ].join("\n");
 }
 
-/** Sleep helper (runtime-only; never at module scope). */
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 /**
  * Judge one piece of drafted content against a surface rubric.
  * Fails OPEN on infra/parse failure: returns {pass: true, skipped: true} so a
@@ -237,23 +226,21 @@ export async function judgeContent(env, { surface, rubric, content, context = ""
     content,
   ].filter(Boolean).join("\n");
 
+  // callAnthropic now retries transient failures internally (lib/retry.js:
+  // 429/5xx/network), so the judge makes a SINGLE call and no longer stacks its
+  // own retry loop on top (which would compound to ~9 network attempts). A throw
+  // here means retries were exhausted or the error was non-transient; fail OPEN
+  // so an Anthropic blip never zeroes a day's content.
   let raw = "";
-  for (let attempt = 1; attempt <= JUDGE_ATTEMPTS; attempt++) {
-    try {
-      raw = await callAnthropic(env, system, [{ role: "user", content: user }], {
-        model: judgeModel,
-        maxTokens: 400,
-        surface: "content-judge",
-      });
-      break;
-    } catch (err) {
-      if (attempt === JUDGE_ATTEMPTS) {
-        console.warn(`[contentJudge] ${surface || "custom"}: judge call failed after ${JUDGE_ATTEMPTS} attempts, failing open:`, err.message);
-        return { pass: true, score: 0, issues: [], skipped: true };
-      }
-      console.warn(`[contentJudge] ${surface || "custom"}: judge attempt ${attempt} failed, retrying:`, err.message);
-      await sleep(JUDGE_BACKOFF_MS * attempt);
-    }
+  try {
+    raw = await callAnthropic(env, system, [{ role: "user", content: user }], {
+      model: judgeModel,
+      maxTokens: 400,
+      surface: "content-judge",
+    });
+  } catch (err) {
+    console.warn(`[contentJudge] ${surface || "custom"}: judge call failed, failing open:`, err.message);
+    return { pass: true, score: 0, issues: [], skipped: true };
   }
 
   const verdict = parseJudgeVerdict(raw);

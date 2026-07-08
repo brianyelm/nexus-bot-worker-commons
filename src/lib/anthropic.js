@@ -28,12 +28,18 @@
 //   env.CLAUDE_MODEL       - optional; defaults to claude-opus-4-7
 // =============================================================================
 
+import { withRetry, isRetryableAnthropicError } from "./retry.js";
+
 const API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 const DEFAULT_MODEL = "claude-opus-4-7";
 const MAX_TOKENS = 4096;
 const TIMEOUT_MS = 60000;
 const MAX_TOOL_ITERATIONS = 10;
+// Retry the idempotent HTTP POST (not tool execution) on transient failures.
+// 3 attempts with 1s then 5s backoff; classifier retries 429/5xx + network tells.
+const RETRY_ATTEMPTS = 3;
+const RETRY_BACKOFF_MS = [1_000, 5_000, 15_000];
 
 /**
  * Guarantee the messages array opens with a user turn. The Anthropic Messages
@@ -134,28 +140,42 @@ async function _post(apiKey, body, route = {}) {
   };
   // Tag the request for the CF AI Gateway dashboard when routed through it.
   if (route.metadata) headers["cf-aig-metadata"] = JSON.stringify(route.metadata);
-  let res;
-  try {
-    res = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
-  } catch (err) {
-    throw new Error(`[anthropic] fetch failed: ${err.message}`);
-  }
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`[anthropic] API error ${res.status}: ${text}`);
-  }
-
-  try {
-    return await res.json();
-  } catch (err) {
-    throw new Error(`[anthropic] JSON parse failed: ${err.message}`);
-  }
+  // Retry the POST on transient failures (429/5xx/network). The status-check
+  // throw lives INSIDE the retried closure so the classifier sees the status
+  // and a 5xx/429 is retried while a 4xx fails fast. Only the idempotent HTTP
+  // POST retries here; the tool-use loop never re-executes handlers.
+  return withRetry(
+    async () => {
+      let res;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(TIMEOUT_MS),
+        });
+      } catch (err) {
+        throw new Error(`[anthropic] fetch failed: ${err.message}`);
+      }
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`[anthropic] API error ${res.status}: ${text}`);
+      }
+      try {
+        return await res.json();
+      } catch (err) {
+        throw new Error(`[anthropic] JSON parse failed: ${err.message}`);
+      }
+    },
+    {
+      attempts: RETRY_ATTEMPTS,
+      backoffMs: RETRY_BACKOFF_MS,
+      isRetryable: isRetryableAnthropicError,
+      onRetry: (err, attempt, delayMs) =>
+        console.warn(`[anthropic] transient failure, retry ${attempt} in ${delayMs}ms: ${err.message}`),
+    },
+  );
 }
 
 /**
