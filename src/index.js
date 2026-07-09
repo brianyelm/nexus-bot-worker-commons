@@ -60,6 +60,7 @@ export { notifyEmailDown, BOT_HOME_CHANNELS } from "./lib/emailBackup.js";
 export { postApprovalCard, processButtonClick } from "./lib/hitl.js";
 export { postHitlCard, renderHitlCard } from "./lib/hitlCard.js";
 export { runSelfReviewLoop, handleSelfReviewLoopClick, recommendationFingerprint } from "./lib/selfReviewLoop.js";
+export { handleHitlSettled } from "./handlers/handleHitlSettled.js";
 export {
   linkButton,
   linkButtons,
