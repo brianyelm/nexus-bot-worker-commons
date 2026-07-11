@@ -44,7 +44,7 @@ export { isAutomaticReply } from "./lib/mailSafety.js";
 export { stageExternalReply, handleExternalReplyGate } from "./lib/externalReplyGate.js";
 export { looksLikeIncomingPayment } from "./lib/incomingPayment.js";
 export { memoryHmacHex, buildMemoryAuthHeaders } from "./lib/memoryAuth.js";
-export { postToNexus, uploadBotAttachment, attachImagesFromUrls, attachButtons, disableMessageButtons, settleMessageComponents, settleHitlCard, attachModals, editNexusMessage, fetchChannelMessages, fetchThreadMessages, sendNexusHeartbeat, sendTyping, pingBotPresence } from "./lib/nexus.js";
+export { postToNexus, uploadBotAttachment, attachImagesFromUrls, attachButtons, attachSelectMenus, disableMessageButtons, settleMessageComponents, settleHitlCard, attachModals, editNexusMessage, fetchChannelMessages, fetchThreadMessages, sendNexusHeartbeat, sendTyping, pingBotPresence } from "./lib/nexus.js";
 export { withProvenance, getProvenanceContext } from "./lib/provenanceContext.js";
 export { crmReadTools, crmReadHandlers } from "./lib/crmCodes.js";
 export {

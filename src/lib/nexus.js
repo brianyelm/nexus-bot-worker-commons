@@ -487,6 +487,64 @@ export async function attachButtons(env, messageId, buttons, options = {}) {
 }
 
 /**
+ * Attach select menus (dropdown, or checkbox-style rows when max_values > 1)
+ * to a Nexus message the bot authored.
+ * Uses POST /api/bot/messages/:id/select-menus (Bearer auth).
+ *
+ * Menu shape: { custom_id: '<bot>:<id>', placeholder?, min_values?,
+ *   max_values?, options: [{value, label, description?, default?}] }.
+ * Options with default: true start selected in the UI.
+ *
+ * When a callback secret resolves, each menu is stamped with a callback_url
+ * marker + callback_secret so submissions reach the bot over the signed HTTP
+ * path at POST /api/internal/select-submit (fleet workers hold no BotRouter
+ * WS). Nexus ignores the marker's path and canonicalizes the URL from the
+ * bot's registered origin, same as buttons. Without a secret the menu stays
+ * on the WS dispatch path.
+ *
+ * @param {object} env
+ * @param {string} messageId - Nexus message id returned by postToNexus
+ * @param {Array<object>} menus
+ * @param {object} [options]
+ * @param {string} [options.nexusKeyEnvVar] - env var name holding the API key
+ * @param {string} [options.callbackSecretEnvVar] - env var name for callback_secret
+ * @param {string} [options.callbackSecret] - callback_secret value directly
+ * @returns {Promise<Array|null>} inserted menu rows or null on error
+ */
+export async function attachSelectMenus(env, messageId, menus, options = {}) {
+  const apiKey = resolveNexusKey(env, options);
+  if (!apiKey || !env.NEXUS_BASE_URL) return null;
+
+  const callbackSecret = resolveCallbackSecret(env, options);
+
+  const withSecret = (Array.isArray(menus) ? menus : []).map((m) => ({
+    ...m,
+    ...(callbackSecret
+      ? { callback_url: "https://canonicalized-at-attach.invalid", callback_secret: callbackSecret }
+      : {}),
+  }));
+
+  try {
+    const result = await _bearerPostWithRetry(
+      `${env.NEXUS_BASE_URL}/api/bot/messages/${messageId}/select-menus`,
+      { select_menus: withSecret },
+      apiKey,
+    );
+    pingBotPresence(env, options).catch(() => {});
+    return result?.data || null;
+  } catch (err) {
+    console.warn(`[nexus] attachSelectMenus(${messageId}) failed:`, err.message);
+    _getReportFleetError().then(fn => fn(env, {
+      bot: deriveBotName(env, options),
+      op: "attachSelectMenus",
+      msg: err.message,
+      ctx: { messageId, menuCount: Array.isArray(menus) ? menus.length : null },
+    }, options)).catch(() => {});
+    return null;
+  }
+}
+
+/**
  * Disable action buttons on a Nexus message the bot authored. Disabled buttons
  * render greyed + non-clickable and the click route rejects stale clicks. Link
  * buttons (url set) are never disabled server-side, so an "Open in CRM" deep
