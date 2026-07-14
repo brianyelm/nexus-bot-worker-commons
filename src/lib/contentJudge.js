@@ -142,7 +142,7 @@ export const FLEET_RUBRICS = {
     "3. VOICE: bandmate talking, not a label's marketing intern. 'We are excited to announce' energy is a FAIL.",
     "4. PLATFORM FIT: TikTok hook-first and punchy, X under 120 chars, YouTube title under 60 chars, LinkedIn same tone without B2B softening.",
     "5. COHERENCE: no caption may contradict the asset description or invent scenes not supported by it.",
-    "6. NO ALT-TEXT NARRATION: a caption that describes the photo's layout, positions, lighting, or framing ('X on the left', 'Y above him', 'under a red wash', 'close-up of', 'wide shot') is a FAIL. The image speaks for itself; the caption tells the story behind the moment, never a description of the picture. Reciting or lightly paraphrasing the asset description as caption text is the same FAIL.",
+    "6. NO ALT-TEXT NARRATION: a caption that describes the photo's layout, positions, lighting, or framing ('X on the left', 'Y above him', 'under a red wash', 'close-up of', 'wide shot') is a FAIL. The image speaks for itself; the caption tells the story behind the moment, never a description of the picture. Reciting or lightly paraphrasing the asset description as caption text is the same FAIL. This includes stylish fragment inventories of what is visible ('mid scream, teal five string strapped on, chrome mic catching the lights'): opening on visible contents is a FAIL however it is phrased; one mid-caption visual detail as seasoning is the maximum.",
   ].join("\n"),
 };
 
