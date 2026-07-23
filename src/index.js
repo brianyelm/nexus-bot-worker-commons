@@ -31,6 +31,7 @@ export { ReminderDOBase, scheduleReminderAlarm, bootstrapReminderAlarm } from ".
 export { handleCommandList, FOUNDATION_COMMAND_META } from "./handlers/handleCommandList.js";
 export { callAnthropic, callAnthropicWithTools } from "./lib/anthropic.js";
 export { withRetry, isRetryableAnthropicError } from "./lib/retry.js";
+export { researchWatercoolerShare, collectSearchResultUrls, verifySharedUrl, parseResearchJson } from "./lib/researchShare.js";
 export { judgeContent, judgeContentWithRedraft, parseJudgeVerdict, buildRetryFeedback, FLEET_RUBRICS, JUDGE_PASS_THRESHOLD } from "./lib/contentJudge.js";
 export { buildActionBreadcrumb, summarizeToolCall, isReadonlyToolName, looksLikeUnbackedClaim } from "./lib/actionTrace.js";
 export { verifyNexusSignature, timingSafeEqual } from "./lib/callbackSign.js";
