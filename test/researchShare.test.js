@@ -12,6 +12,7 @@ import {
   collectSearchResultUrls,
   verifySharedUrl,
   parseResearchJson,
+  recoverGroundedUrl,
 } from "../src/lib/researchShare.js";
 
 const SAMPLE_CONTENT = [
@@ -56,6 +57,19 @@ test("verifySharedUrl accepts exact and normalized matches only", () => {
   assert.equal(verifySharedUrl("https://www.audubon.org/news/invented-story", urls), false);
   assert.equal(verifySharedUrl("not a url", urls), false);
   assert.equal(verifySharedUrl("", urls), false);
+});
+
+test("recoverGroundedUrl repairs a small tail garble, rejects real divergence", () => {
+  const real = "https://wfopublications.org/rare-bird-sighting-a-fork-tailed-flycatcher-in-oregon/";
+  const urls = [real, "https://other.example.com/story"];
+  // the live-observed failure: duplicated syllable appended to the real URL
+  const garbled = "https://wfopublications.org/rare-bird-sighting-a-fork-tailed-flycatcher-in-oregonon/";
+  assert.equal(recoverGroundedUrl(garbled, urls), real);
+  // different host never recovers
+  assert.equal(recoverGroundedUrl("https://evil.example.net/rare-bird-sighting-a-fork-tailed-flycatcher-in-oregon/", urls), null);
+  // same host but a different article never recovers
+  assert.equal(recoverGroundedUrl("https://wfopublications.org/completely-invented-story/", urls), null);
+  assert.equal(recoverGroundedUrl("not a url", urls), null);
 });
 
 test("parseResearchJson handles fences, stray prose, and missing fields", () => {

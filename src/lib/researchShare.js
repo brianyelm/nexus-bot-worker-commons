@@ -103,6 +103,50 @@ export function verifySharedUrl(url, resultUrls) {
 }
 
 /**
+ * Recover the real result URL behind a near-miss claim. Haiku sometimes garbles
+ * a result URL when copying it into the share (observed live: a real article
+ * URL with a duplicated syllable appended). When the claimed URL is on the same
+ * host as a real result and shares almost its entire normalized prefix, the
+ * REAL result URL is returned so the share carries what search actually saw.
+ * Anything less similar stays unrecoverable: the caller must refuse.
+ *
+ * @param {string} claimedUrl - URL the model returned
+ * @param {string[]} resultUrls - URLs collected from real search results
+ * @returns {string|null} the real result URL, or null when no safe match
+ */
+export function recoverGroundedUrl(claimedUrl, resultUrls) {
+  const claimed = normalizeUrl(claimedUrl);
+  if (!claimed) return null;
+  let claimedHost;
+  try {
+    claimedHost = new URL(claimed).host;
+  } catch {
+    return null;
+  }
+  let best = null;
+  for (const raw of resultUrls) {
+    const norm = normalizeUrl(raw);
+    if (!norm) continue;
+    let host;
+    try {
+      host = new URL(norm).host;
+    } catch {
+      continue;
+    }
+    if (host !== claimedHost) continue;
+    let prefixLen = 0;
+    const max = Math.min(norm.length, claimed.length);
+    while (prefixLen < max && norm[prefixLen] === claimed[prefixLen]) prefixLen++;
+    // The shared prefix must cover nearly all of BOTH forms; that means the
+    // model reproduced the real URL modulo a small tail garble.
+    if (prefixLen >= norm.length * 0.9 && prefixLen >= claimed.length * 0.8) {
+      if (!best || prefixLen > best.prefixLen) best = { url: raw, prefixLen };
+    }
+  }
+  return best ? best.url : null;
+}
+
+/**
  * Parse the strict-JSON share payload out of the model's final text, tolerating
  * markdown fences and stray prose around the object.
  *
@@ -278,7 +322,13 @@ export async function researchWatercoolerShare(env, opts = {}) {
 
   const resultUrls = collectSearchResultUrls(allContent);
   if (!verifySharedUrl(share.url, resultUrls)) {
-    throw new Error(`[researchShare] url not grounded in search results, refusing to share: ${share.url}`);
+    const recovered = recoverGroundedUrl(share.url, resultUrls);
+    if (!recovered) {
+      throw new Error(`[researchShare] url not grounded in search results, refusing to share: ${share.url}`);
+    }
+    console.warn(`[researchShare] recovered garbled url: ${share.url} -> ${recovered}`);
+    share.post = share.post.split(share.url).join(recovered);
+    share.url = recovered;
   }
 
   let post = scrubFleetDashes(share.post);
