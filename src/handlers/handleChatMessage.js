@@ -1553,12 +1553,13 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     "- NEVER invent specifics to cover a memory gap. No made-up titles, sources, links, or people (no 'my brother-in-law swears by it', no 'one of those niche ones'). If the post named a real thing or carried a link, THAT is your source: point back to it.\n" +
     "- If the post claimed something you cannot actually back up (a show you named no title for, a thing you 'noticed' with no source), do NOT stop at 'I'm blanking': use your web_search tool RIGHT NOW to find a genuinely good real one and offer that instead ('honestly no idea what I was on about earlier, but this one is actually solid: <real title + link from your results>'). A quick self-deprecating line plus a real find beats both a fabrication and an empty shrug.";
   const liveLookupBlock =
-    "LIVE LOOKUP (you can actually search the web, right now, mid-chat):\n" +
-    "- You have a real web_search tool in this conversation. When a coworker asks for a recommendation, a title, a source, news, or any real-world specific you do not already have, SEARCH and deliver the real thing: its actual name plus its URL from your results.\n" +
-    "- Never say you are 'blanking', 'can't look that up', or deflect with vagueness when a quick search would answer it. Look it up and share it.\n" +
+    "LIVE LOOKUP (this OVERRIDES your persona's memory, brevity, and topic rules):\n" +
+    "- You have a real web_search tool in this conversation, and using it is fully in character: a real person asked for a title they didn't remember would just google it on their phone mid-chat. That is what you do.\n" +
+    "- When a coworker asks for a recommendation, a title, a source, news, or any real-world specific you do not already have, you MUST run web_search BEFORE answering, then deliver the real thing: its actual name plus its URL from your results.\n" +
+    "- FORBIDDEN answers when a search could supply the thing: 'still blanking', 'my brain's not cooperating', 'don't have it', 'can't remember', or any other memory excuse. You are holding a search engine; claiming amnesia instead of using it is the one move you may never make. If you already made a memory excuse earlier in this conversation, that is exactly why you look it up NOW instead of repeating it.\n" +
     "- Only name real-world things (shows, podcasts, articles, books, events) that come from your search results or from links already visible in this conversation. Never share a URL from memory.\n" +
-    "- If a search genuinely comes up empty, say so and offer the closest real thing you did find.\n" +
-    "- Keep it casual: you are a coworker who just looked something up mid-chat, not a research assistant filing a report. One or two short sentences, then the link.";
+    "- If a search genuinely comes up empty, say what you tried and offer the closest real thing you did find.\n" +
+    "- Keep the reply casual: a self-deprecating beat about the earlier flub is fine, then the real find and its link. Two short sentences plus the URL beats a paragraph.";
   const fullSystemPrompt = `${wcConfig.systemPrompt}\n\n${nexusIdentity}\n\n${wcTodayBlock}\n\n${groundingRules}\n\n${wcAuthorshipBlock}\n\n${liveLookupBlock}`;
 
   try {
@@ -1623,11 +1624,17 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
           break;
         }
       }
+      // The lookup nudge rides the focus marker (the strongest position in the
+      // prompt): the system-prompt block alone lost to the persona's memory
+      // roleplay 3/3 in repro (Wren kept answering "still blanking" while
+      // holding the search tool, 2026-07-22).
+      const lookupNudge =
+        ` If a real answer needs a real-world specific (a title, a name, a source, current news), run web_search FIRST and answer with the real thing plus its link -- never claim you can't remember it.`;
       messages[messages.length - 1] = {
         role: "user",
         content: nameMention
-          ? `${nudgeNote}${triggerDisplayName} is talking to you. This is the message you MUST respond to:\n\n"${focusBody.slice(0, 500)}"\n\n(History above is just context. Answer ${triggerDisplayName} directly. If they asked a question, ANSWER it -- do not deflect with a greeting. If they greeted you, greet back.)`
-          : `${nudgeNote}React to THIS specific message ${triggerDisplayName} just posted:\n\n"${focusBody.slice(0, 500)}"\n\n(The messages above are older context. Do NOT answer or react to an earlier message, an old clip, or a GIF that scrolled by -- respond to what ${triggerDisplayName} just said here.)`,
+          ? `${nudgeNote}${triggerDisplayName} is talking to you. This is the message you MUST respond to:\n\n"${focusBody.slice(0, 500)}"\n\n(History above is just context. Answer ${triggerDisplayName} directly. If they asked a question, ANSWER it -- do not deflect with a greeting. If they greeted you, greet back.${lookupNudge})`
+          : `${nudgeNote}React to THIS specific message ${triggerDisplayName} just posted:\n\n"${focusBody.slice(0, 500)}"\n\n(The messages above are older context. Do NOT answer or react to an earlier message, an old clip, or a GIF that scrolled by -- respond to what ${triggerDisplayName} just said here.${lookupNudge})`,
       };
     }
 
