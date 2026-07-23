@@ -175,6 +175,34 @@ export function parseResearchJson(text) {
 }
 
 /**
+ * Ground every URL in a free-form chat reply against an allowlist of URLs the
+ * model actually saw (web_search results + links already present in the
+ * conversation). Grounded URLs stay, near-miss garbles are repaired to the
+ * real result URL, and anything else (a URL recalled from training data) is
+ * stripped. Used by the watercooler chat pipeline's live-lookup path.
+ *
+ * @param {string} text - candidate reply text
+ * @param {string[]} allowedUrls - URLs from search results / conversation
+ * @returns {{ text: string, dropped: string[] }} cleaned text + removed URLs
+ */
+export function groundUrlsInText(text, allowedUrls) {
+  const dropped = [];
+  if (typeof text !== "string" || !text) return { text: text || "", dropped };
+  const urlRe = /https?:\/\/[^\s)\]}"'<>]+/g;
+  const cleaned = text.replace(urlRe, (match) => {
+    // Trailing sentence punctuation is not part of the URL.
+    const trimmed = match.replace(/[.,;:!?]+$/, "");
+    const tail = match.slice(trimmed.length);
+    if (verifySharedUrl(trimmed, allowedUrls)) return match;
+    const recovered = recoverGroundedUrl(trimmed, allowedUrls);
+    if (recovered) return recovered + tail;
+    dropped.push(trimmed);
+    return "";
+  });
+  return { text: cleaned.replace(/[ \t]{2,}/g, " ").trim(), dropped };
+}
+
+/**
  * Build the research system prompt around the caller's persona voice.
  *
  * @param {string} personaPrompt - who is sharing and how they sound

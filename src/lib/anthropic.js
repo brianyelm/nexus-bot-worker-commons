@@ -200,6 +200,13 @@ function extractText(data) {
  * @param {Array<{role: string, content: string|Array}>} messages - Conversation turns
  * @param {object} [options]
  * @param {number} [options.maxTokens]
+ * @param {Array} [options.serverTools] - SERVER-executed tool definitions only
+ *   (e.g. web_search_20250305). Anthropic runs these itself, so no handler
+ *   loop is needed; this function just continues the turn on "pause_turn".
+ *   Client-executed tools still require callAnthropicWithTools.
+ * @param {(content: Array) => void} [options.onServerToolContent] - Hook fed
+ *   the accumulated content blocks (across pause_turn continuations) so
+ *   callers can ground-check URLs against real web_search results.
  * @returns {Promise<string>} Assistant message text
  */
 export async function callAnthropic(env, systemPrompt, messages, options = {}) {
@@ -207,6 +214,9 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
   const apiKey = env.ANTHROPIC_API_KEY;
 
   if (!apiKey) throw new Error("[anthropic] ANTHROPIC_API_KEY is not configured");
+
+  const serverTools =
+    Array.isArray(options.serverTools) && options.serverTools.length > 0 ? options.serverTools : null;
 
   const body = {
     model,
@@ -226,11 +236,39 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
     ],
     messages: applyCacheToLastMessage(normalizeLeadingRole(messages)),
   };
+  if (serverTools) body.tools = serverTools;
 
-  const data = await _post(apiKey, body, resolveAnthropicRoute(env, options.surface));
-  const text = data?.content?.[0]?.text;
-  if (typeof text !== "string") {
-    throw new Error(`[anthropic] unexpected response shape: ${JSON.stringify(data)}`);
+  const route = resolveAnthropicRoute(env, options.surface);
+  let data = await _post(apiKey, body, route);
+
+  let allContent = Array.isArray(data?.content) ? [...data.content] : [];
+  if (serverTools) {
+    // A long server-side tool run can pause the turn; resend the accumulated
+    // content so the search continues where it left off. Bounded so a stuck
+    // turn cannot loop.
+    let continuations = 0;
+    let workingMessages = normalizeLeadingRole([...messages]);
+    while (data.stop_reason === "pause_turn" && continuations < 2) {
+      continuations++;
+      workingMessages = [...workingMessages, { role: "assistant", content: data.content }];
+      data = await _post(apiKey, { ...body, messages: applyCacheToLastMessage(workingMessages) }, route);
+      if (Array.isArray(data?.content)) allContent.push(...data.content);
+    }
+    if (typeof options.onServerToolContent === "function") {
+      try { options.onServerToolContent(allContent); } catch (e) {
+        console.warn("[anthropic] onServerToolContent hook failed:", e.message);
+      }
+    }
+  }
+
+  // With server tools the text can sit after tool_use/result blocks AND be
+  // split into citation fragments, so join ALL text blocks of the final
+  // response with no separator (a "\n" join would break lines mid-sentence).
+  const text = serverTools
+    ? (data?.content || []).filter(b => b.type === "text").map(b => b.text).join("")
+    : data?.content?.[0]?.text;
+  if (typeof text !== "string" || (serverTools && !text)) {
+    throw new Error(`[anthropic] unexpected response shape: ${JSON.stringify(data).slice(0, 600)}`);
   }
   if (typeof options.onUsage === "function" && data.usage) {
     try { options.onUsage(data.usage); } catch (e) { /* never break main flow */ }

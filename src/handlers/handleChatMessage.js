@@ -46,6 +46,7 @@ import { shouldChimeIn } from "../lib/watercooler.js";
 import { phoenixToday } from "../lib/format.js";
 import { buildActionBreadcrumb } from "../lib/actionTrace.js";
 import { scrubFleetDashes } from "../lib/sanitize.js";
+import { collectSearchResultUrls, groundUrlsInText } from "../lib/researchShare.js";
 
 // Detect GIF-only messages so bots receive "[GIF image: <url>]" instead of
 // a bare CDN URL they cannot interpret.
@@ -1549,8 +1550,16 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     "- If you cannot recall the details behind a post, or cannot fully back up a claim you made in it, be honest and human ('yeah that was me, honestly I was only half paying attention, I probably overstated it') instead of disowning it.\n" +
     "- This holds even when the post's CONTENT makes no sense to you: it names a person you do not know, a platform the company does not use, an event that never happened. The impossible content does not make it someone else's post. It is still yours; you garbled it. Own it and walk it back ('that was me, and honestly I have no idea why I said that, I must have gotten my wires crossed') rather than concluding the tag is wrong or someone posted as you. Denying authorship is ALWAYS the wrong move; correcting yourself is always the right one.\n" +
     "- When someone follows up on your post, engage with the actual content: clarify it, walk it back, or expand on it. Treat it as your own thought, because it is.\n" +
-    "- NEVER invent specifics to cover a memory gap. No made-up titles, sources, links, or people (no 'my brother-in-law swears by it', no 'one of those niche ones'). If the post named a real thing or carried a link, THAT is your source: point back to it. If the post claimed something you cannot actually back up (a show you named no title for, a thing you 'noticed' with no source), own the gap plainly ('honestly I don't have a name for you, I shouldn't have made it sound that specific') instead of improvising fake details. A dead-end admission is fine; a fabricated follow-up is the incident.";
-  const fullSystemPrompt = `${wcConfig.systemPrompt}\n\n${nexusIdentity}\n\n${wcTodayBlock}\n\n${groundingRules}\n\n${wcAuthorshipBlock}`;
+    "- NEVER invent specifics to cover a memory gap. No made-up titles, sources, links, or people (no 'my brother-in-law swears by it', no 'one of those niche ones'). If the post named a real thing or carried a link, THAT is your source: point back to it.\n" +
+    "- If the post claimed something you cannot actually back up (a show you named no title for, a thing you 'noticed' with no source), do NOT stop at 'I'm blanking': use your web_search tool RIGHT NOW to find a genuinely good real one and offer that instead ('honestly no idea what I was on about earlier, but this one is actually solid: <real title + link from your results>'). A quick self-deprecating line plus a real find beats both a fabrication and an empty shrug.";
+  const liveLookupBlock =
+    "LIVE LOOKUP (you can actually search the web, right now, mid-chat):\n" +
+    "- You have a real web_search tool in this conversation. When a coworker asks for a recommendation, a title, a source, news, or any real-world specific you do not already have, SEARCH and deliver the real thing: its actual name plus its URL from your results.\n" +
+    "- Never say you are 'blanking', 'can't look that up', or deflect with vagueness when a quick search would answer it. Look it up and share it.\n" +
+    "- Only name real-world things (shows, podcasts, articles, books, events) that come from your search results or from links already visible in this conversation. Never share a URL from memory.\n" +
+    "- If a search genuinely comes up empty, say so and offer the closest real thing you did find.\n" +
+    "- Keep it casual: you are a coworker who just looked something up mid-chat, not a research assistant filing a report. One or two short sentences, then the link.";
+  const fullSystemPrompt = `${wcConfig.systemPrompt}\n\n${nexusIdentity}\n\n${wcTodayBlock}\n\n${groundingRules}\n\n${wcAuthorshipBlock}\n\n${liveLookupBlock}`;
 
   try {
     await sendTyping(env, channel_slug, "start", nexusOptions);
@@ -1710,7 +1719,19 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
       lastMsg.content = [...wcGifBlocks, { type: "text", text: focusNote }];
     }
 
-    const wcCallOpts = { model: "claude-sonnet-5", maxTokens: 250 }; // 2026-07-01 fleet bump; callAnthropic defaults thinking:disabled
+    // Live lookup: give the watercooler responder a real server-side
+    // web_search tool so "which podcast was that?" gets an actual answer
+    // instead of a shrug or a fabrication (Brian 2026-07-22). Search results
+    // are captured so every URL in the reply can be ground-checked below.
+    // maxTokens raised from 250: tool_use blocks count against the budget.
+    let wcSearchContent = [];
+    const wcCallOpts = {
+      model: "claude-sonnet-5",
+      maxTokens: 600,
+      surface: "watercooler",
+      serverTools: [{ type: "web_search_20250305", name: "web_search", max_uses: 3 }],
+      onServerToolContent: (content) => { wcSearchContent = content; },
+    }; // 2026-07-01 fleet bump; callAnthropic defaults thinking:disabled
     let response;
     try {
       response = await callAnthropic(env, fullSystemPrompt, messages, wcCallOpts);
@@ -1743,7 +1764,23 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
     }
 
     if (response && response.trim()) {
-      const cleaned = scrubFleetDashes(response.trim());
+      let cleaned = scrubFleetDashes(response.trim());
+      // Ground every URL in the reply: allowed sources are actual web_search
+      // results plus links already visible in the channel window. A URL the
+      // model "remembered" is stripped; a garbled copy of a real result URL is
+      // repaired to the real one. Mirrors the scheduled-share guarantee.
+      const urlRe = /https?:\/\/[^\s)\]}"'<>]+/g;
+      const historyUrls = (recent || []).flatMap((m) => (m.body || "").match(urlRe) || []);
+      const allowedUrls = [...collectSearchResultUrls(wcSearchContent), ...historyUrls];
+      const grounded = groundUrlsInText(cleaned, allowedUrls);
+      if (grounded.dropped.length > 0) {
+        console.warn(`[watercooler] ${config.botName} stripped ungrounded url(s): ${grounded.dropped.join(", ")}`);
+      }
+      cleaned = grounded.text;
+      if (!cleaned) {
+        console.warn(`[watercooler] ${config.botName} reply empty after url grounding, skipping`);
+        return;
+      }
       if (looksLikeWatercoolerMetaLeak(cleaned)) {
         console.warn(`[watercooler] ${config.botName} meta-leak suppressed: ${cleaned.slice(0, 80)}`);
         return;

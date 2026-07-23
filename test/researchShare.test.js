@@ -13,6 +13,7 @@ import {
   verifySharedUrl,
   parseResearchJson,
   recoverGroundedUrl,
+  groundUrlsInText,
 } from "../src/lib/researchShare.js";
 
 const SAMPLE_CONTENT = [
@@ -70,6 +71,23 @@ test("recoverGroundedUrl repairs a small tail garble, rejects real divergence", 
   // same host but a different article never recovers
   assert.equal(recoverGroundedUrl("https://wfopublications.org/completely-invented-story/", urls), null);
   assert.equal(recoverGroundedUrl("not a url", urls), null);
+});
+
+test("groundUrlsInText keeps grounded urls, repairs garbles, strips inventions", () => {
+  const allowed = ["https://darknetdiaries.com/episode/150", "https://example.com/real-article"];
+  // grounded url with trailing punctuation survives intact
+  const keep = groundUrlsInText("this one is great: https://darknetdiaries.com/episode/150.", allowed);
+  assert.equal(keep.text, "this one is great: https://darknetdiaries.com/episode/150.");
+  assert.deepEqual(keep.dropped, []);
+  // garbled tail repaired to the real url
+  const fix = groundUrlsInText("check https://example.com/real-articlecle out", allowed);
+  assert.equal(fix.text, "check https://example.com/real-article out");
+  // invented url stripped, text tidied
+  const strip = groundUrlsInText("try https://podcastland.example.net/made-up maybe", allowed);
+  assert.equal(strip.text, "try maybe");
+  assert.deepEqual(strip.dropped, ["https://podcastland.example.net/made-up"]);
+  // no urls = untouched
+  assert.equal(groundUrlsInText("no links here", allowed).text, "no links here");
 });
 
 test("parseResearchJson handles fences, stray prose, and missing fields", () => {
