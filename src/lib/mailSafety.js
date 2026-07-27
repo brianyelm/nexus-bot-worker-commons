@@ -35,9 +35,20 @@ const AUTO_SUBJECT_RE =
 const AUTO_SUBJECT_ANYWHERE_RE =
   /\b(?:auto[\s-]?reply|automatic reply|automated (?:reply|response|message|notification|email)|do[\s-]?not[\s-]?reply|invoice capture)\b/i;
 
-// System senders it is never correct to reply to.
+// System senders it is never correct to reply to. Each token may carry a
+// suffix before the @ (e.g. "noreply-dmarc-support@google.com",
+// "noreply-dmarc@sicher.web.de"): Google's DMARC rua sender slipped the old
+// anchored-at-@ form and Robert drafted replies to report robots (2026-07-23).
 const NOREPLY_SENDER_RE =
-  /^(?:no-?reply|do-?not-?reply|donotreply|noreply|mailer-daemon|postmaster|bounce[sd]?|mail-?delivery|microsoftexchange[\w-]*|invoice-?capture|auto-?reply|autoreply|autonotification|automated|notifications?)@/i;
+  /^(?:no-?reply|do-?not-?reply|donotreply|mailer-daemon|postmaster|bounce[sd]?|mail-?delivery|microsoftexchange[\w-]*|invoice-?capture|auto-?reply|autoreply|autonotification|automated|notifications?|dmarc-?reports?)(?:[._+-][\w.+-]*)?@/i;
+
+// DMARC aggregate (rua) report mail. RFC 7489 fixes the subject convention
+// "Report Domain: <domain> Submitter: <org> Report-ID: <id>"; some reporters
+// prefix a bracketed tag (Microsoft uses "[Preview]"). Senders vary wildly
+// (dmarcreport@microsoft.com has no no-reply marker at all), so match the
+// subject shape too. These are machine reports, never conversations.
+const DMARC_REPORT_SUBJECT_RE =
+  /^\s*(?:\[[^\]]{0,40}\]\s*)*report domain\s*:/i;
 
 // Domains whose mail is system-generated end to end (AP-intake / expense-capture
 // acknowledgements). We never hold a human conversation with these, so never
@@ -119,6 +130,9 @@ export function isAutomaticReply(email = {}) {
   const subject = String(email.subject || "");
   if (AUTO_SUBJECT_RE.test(subject)) reasons.push("subject");
   else if (AUTO_SUBJECT_ANYWHERE_RE.test(subject)) reasons.push("subject-anywhere");
+
+  // DMARC rua report subject shape.
+  if (DMARC_REPORT_SUBJECT_RE.test(subject)) reasons.push("dmarc-report");
 
   // System sender heuristic (no-reply local-part, or a known AP-intake domain).
   const from = extractAddress(email.from || email.fromAddress || email.sender);
