@@ -9,8 +9,10 @@ import {
   parseJudgeVerdict,
   buildRetryFeedback,
   judgeContentWithRedraft,
+  resolvePassThreshold,
   FLEET_RUBRICS,
   JUDGE_PASS_THRESHOLD,
+  SURFACE_PASS_THRESHOLDS,
 } from "../src/lib/contentJudge.js";
 
 // A scripted judge stub: returns the next queued verdict on each call, records
@@ -76,6 +78,29 @@ test("parseJudgeVerdict returns null on garbage / non-JSON / missing fields", ()
   assert.equal(parseJudgeVerdict("Looks fine to me!"), null);
   assert.equal(parseJudgeVerdict("{broken"), null);
   assert.equal(parseJudgeVerdict('{"verdict": "good"}'), null);
+});
+
+test("parseJudgeVerdict honours an explicit lower threshold", () => {
+  const raw = '{"pass": true, "score": 6, "issues": ["minor wording"]}';
+  assert.equal(parseJudgeVerdict(raw).pass, false);   // default threshold 7
+  assert.equal(parseJudgeVerdict(raw, 6).pass, true); // meeting-recap threshold
+});
+
+test("resolvePassThreshold: surface override, explicit override, and default", () => {
+  assert.equal(resolvePassThreshold("meeting-recap"), SURFACE_PASS_THRESHOLDS["meeting-recap"]);
+  assert.equal(resolvePassThreshold("cold-email"), JUDGE_PASS_THRESHOLD);
+  assert.equal(resolvePassThreshold("meeting-recap", 5), 5);
+  assert.equal(resolvePassThreshold("cold-email", 99), JUDGE_PASS_THRESHOLD); // out of range ignored
+  assert.equal(resolvePassThreshold("cold-email", undefined), JUDGE_PASS_THRESHOLD);
+});
+
+test("meeting-recap rubric encodes the house conventions that caused false blocks", () => {
+  const r = FLEET_RUBRICS["meeting-recap"];
+  assert.match(r, /Wren Raven/);           // signature is not a persona leak
+  assert.match(r, /SUBJECT MATTER/);       // AI deliverables are legitimate content
+  assert.match(r, /DISQUALIFYING/);        // tiered, not flat
+  assert.match(r, /EDITORIAL ONLY/);
+  assert.match(r, /do NOT have the transcript/); // no unfalsifiable grounding asks
 });
 
 test("buildRetryFeedback formats issues into an editor-rejection block", () => {

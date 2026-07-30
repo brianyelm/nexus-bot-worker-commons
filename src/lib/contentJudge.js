@@ -32,12 +32,41 @@ import { callAnthropic } from "./anthropic.js";
 // boolean; both must agree so a generous scorer cannot sneak a 6/10 through.
 export const JUDGE_PASS_THRESHOLD = 7;
 
-const JUDGE_OUTPUT_CONTRACT = [
-  "OUTPUT CONTRACT (non-negotiable): reply with ONLY a raw JSON object, no markdown, no code fence, no prose:",
-  '{"pass": <boolean>, "score": <integer 1-10>, "issues": ["<specific problem>", ...]}',
-  `"pass" is true ONLY when score >= ${JUDGE_PASS_THRESHOLD} and no issue is disqualifying.`,
-  '"issues" must be concrete and actionable (what is wrong AND what would fix it), max 4 entries, empty array when clean.',
-].join("\n");
+/**
+ * Per-surface overrides of JUDGE_PASS_THRESHOLD. Lower the bar only where the
+ * cost of a false block is high and the rubric already names its disqualifying
+ * failures explicitly, so a fail means "this leaks / is broken", not "this
+ * could be written better".
+ *
+ * meeting-recap: the recap is a factual record of a call both sides sat
+ * through, not marketing copy, and a withheld one strands a human in the
+ * approval loop. Six of the first six holds (2026-07-22..07-30) scored 2-5;
+ * half were prose nitpicks the recipient would never have noticed.
+ */
+export const SURFACE_PASS_THRESHOLDS = {
+  "meeting-recap": 6,
+};
+
+/**
+ * Resolve the pass threshold for a judge call.
+ * @param {string} [surface]
+ * @param {number} [override] - explicit params.threshold
+ * @returns {number}
+ */
+export function resolvePassThreshold(surface, override) {
+  const n = Number(override);
+  if (Number.isFinite(n) && n >= 1 && n <= 10) return Math.round(n);
+  return SURFACE_PASS_THRESHOLDS[surface] || JUDGE_PASS_THRESHOLD;
+}
+
+function judgeOutputContract(threshold) {
+  return [
+    "OUTPUT CONTRACT (non-negotiable): reply with ONLY a raw JSON object, no markdown, no code fence, no prose:",
+    '{"pass": <boolean>, "score": <integer 1-10>, "issues": ["<specific problem>", ...]}',
+    `"pass" is true ONLY when score >= ${threshold} and no issue is disqualifying.`,
+    '"issues" must be concrete and actionable (what is wrong AND what would fix it), max 4 entries, empty array when clean.',
+  ].join("\n");
+}
 
 /**
  * Fleet rubric library, keyed by surface. Each rubric is the judge's
@@ -78,14 +107,30 @@ export const FLEET_RUBRICS = {
     "5. AUDIENCE FIT: written for business-owner partners, plain language, jargon explained or absent.",
   ].join("\n"),
 
+  // Deliberately TIERED (2026-07-30). The flat five-criterion version withheld
+  // six straight recaps, half of them over prose nitpicks (short-vs-full names)
+  // or house conventions it could not know about (the "Wren Raven" sign-off), and
+  // it kept asking to "verify" facts against a transcript it is never given. A
+  // recap is a factual record of a call both sides attended: withhold it for a
+  // leak or a broken document, never for wording.
   "meeting-recap": [
-    "You are a ruthless editor reviewing ONE meeting recap email before it mails to attendees who may include EXTERNAL clients.",
-    "Judge against ALL of these:",
-    "1. COMPLETENESS SMELL: the recap must read as a finished document: no truncation mid-thought, no sections that trail off, no obviously missing halves (e.g. action items header with no items).",
-    "2. EXTERNAL-SAFE: no internal-only candor, pricing speculation, personnel commentary, or meta-commentary about the AI/tooling ('the transcript was unclear'). Anything embarrassing in front of a client is a FAIL.",
-    "3. GROUNDED: statements must read as summaries of the provided material, not editorializing or invented commitments. Attribute decisions and owners only where stated.",
-    "4. STRUCTURE: clear summary, decisions, and action items (with owners where given); skimmable.",
-    "5. TONE: neutral, professional, concise. No hype, no apology boilerplate.",
+    "You are the final editor on ONE meeting recap email before it mails to the people who were in that meeting, who may include EXTERNAL clients.",
+    "Your job is to stop a recap that would LEAK something or arrive visibly BROKEN. It is not to polish prose. A merely imperfect recap must PASS.",
+    "You are given the finished recap ONLY. You do NOT have the transcript, so you cannot check any name, number, or commitment against the source. Never raise an issue asking anyone to 'verify' or 'confirm' something you have no source for, and never fail a recap because a detail is unfamiliar to you. Judge only what is visible on the page.",
+    "DISQUALIFYING (fail on these, and only these):",
+    "1. LEAK: internal pricing or discount strategy, margins, commission structures, Black Raven's own financials, or internal sales strategy, in a recap with an external recipient. Also details about OTHER clients, deals, or prospects who are not party to this meeting.",
+    "2. TEMPLATE ARTIFACT: an unfilled placeholder rendered as literal text ('(Owner)', '{{name}}', '[Company]', 'TBD' where a name belongs), raw JSON, code fences, unrendered markup, or a section duplicated in two formats.",
+    "3. TRUNCATION: the document stops mid-thought, a heading has no body, or a promised list is empty.",
+    "4. SELF-CONTRADICTION: two incompatible statements, such as an item described as both completed and still open.",
+    "5. META-COMMENTARY ABOUT THIS RECAP: remarks on transcript quality, the summarizer, or confidence in its own output ('the transcript was unclear', '(unverified)').",
+    "EDITORIAL ONLY (mention in issues if genuinely useful, but they must NOT drive a fail): wording, tone, ordering, skimmability, a person called by first name in one place and full name in another, a topic thinner than you would have written it, or a name that appears only once.",
+    "NOT failures (house conventions, do not penalize):",
+    "- The sign-off 'Wren Raven' and the 'Wren AI' label. Wren Raven is the real named sender of every Black Raven IT recap and recipients know her. Never flag the signature, sender identity, or branding.",
+    "- AI, automation, and AI-generated deliverables discussed as SUBJECT MATTER. Black Raven IT and Morphora sell AI services, so a line like 'review the AI-generated website copy before publishing' is a client deliverable, not leaked tooling detail. Only rule 5 (commentary about THIS recap's own generation) is a failure.",
+    "- Naming people who were in the meeting, who own an action item, or whom the attendees already work with.",
+    "- Frank but factual status, including bad news ('two devices still need hands-on work'). Honest status is the point of a recap.",
+    "When the CONTEXT says every recipient is internal, rule 1 does not apply at all: internal candor is expected and must not be penalized.",
+    "Score 7 or above and pass unless a DISQUALIFYING item is actually present. When one is, fail and name exactly what to remove.",
   ].join("\n"),
 
   "client-report": [
@@ -153,9 +198,10 @@ export const FLEET_RUBRICS = {
  * caller treats null as an infra-grade failure and fails open).
  *
  * @param {string} raw - raw model completion
+ * @param {number} [threshold=JUDGE_PASS_THRESHOLD] - minimum score to pass
  * @returns {{pass: boolean, score: number, issues: string[]}|null}
  */
-export function parseJudgeVerdict(raw) {
+export function parseJudgeVerdict(raw, threshold = JUDGE_PASS_THRESHOLD) {
   if (!raw || typeof raw !== "string") return null;
   const jsonMatch = raw.match(/\{[\s\S]*\}/);
   if (!jsonMatch) return null;
@@ -171,7 +217,7 @@ export function parseJudgeVerdict(raw) {
     ? parsed.issues.filter((i) => typeof i === "string" && i.trim()).slice(0, 4)
     : [];
   // Both signals must agree to pass: the judge's own boolean AND the threshold.
-  const pass = parsed.pass === true && score >= JUDGE_PASS_THRESHOLD;
+  const pass = parsed.pass === true && score >= threshold;
   return { pass, score, issues };
 }
 
@@ -210,17 +256,20 @@ export function buildRetryFeedback(verdict) {
  * @param {string} params.content   - the drafted content to judge
  * @param {string} [params.context] - grounding context (recipient, brand, source data)
  * @param {string} [params.model]   - explicit judge model override
+ * @param {number} [params.threshold] - explicit pass threshold (defaults to the
+ *   surface override in SURFACE_PASS_THRESHOLDS, else JUDGE_PASS_THRESHOLD)
  * @returns {Promise<{pass: boolean, score: number, issues: string[], skipped: boolean}>}
  */
-export async function judgeContent(env, { surface, rubric, content, context = "", model } = {}) {
+export async function judgeContent(env, { surface, rubric, content, context = "", model, threshold } = {}) {
   const rubricText = rubric || FLEET_RUBRICS[surface];
   if (!rubricText) throw new Error(`contentJudge: unknown surface "${surface}" and no custom rubric given`);
   if (!content || !content.trim()) {
     return { pass: false, score: 1, issues: ["content is empty"], skipped: false };
   }
 
+  const passThreshold = resolvePassThreshold(surface, threshold);
   const judgeModel = model || env.JUDGE_MODEL || env.CLAUDE_MODEL || "claude-sonnet-5";
-  const system = `${rubricText}\n\nYou judge ONLY the submitted content. You never rewrite it.\n\n${JUDGE_OUTPUT_CONTRACT}`;
+  const system = `${rubricText}\n\nYou judge ONLY the submitted content. You never rewrite it.\n\n${judgeOutputContract(passThreshold)}`;
   const user = [
     context ? `CONTEXT:\n${context}\n` : "",
     "CONTENT TO JUDGE:",
@@ -244,13 +293,13 @@ export async function judgeContent(env, { surface, rubric, content, context = ""
     return { pass: true, score: 0, issues: [], skipped: true };
   }
 
-  const verdict = parseJudgeVerdict(raw);
+  const verdict = parseJudgeVerdict(raw, passThreshold);
   if (!verdict) {
     console.warn(`[contentJudge] ${surface || "custom"}: unparseable verdict, failing open: "${String(raw).slice(0, 120)}"`);
     return { pass: true, score: 0, issues: [], skipped: true };
   }
 
-  console.log(`[contentJudge] ${surface || "custom"}: ${verdict.pass ? "PASS" : "FAIL"} score=${verdict.score}${verdict.issues.length ? ` issues=${JSON.stringify(verdict.issues)}` : ""}`);
+  console.log(`[contentJudge] ${surface || "custom"}: ${verdict.pass ? "PASS" : "FAIL"} score=${verdict.score}/${passThreshold}${verdict.issues.length ? ` issues=${JSON.stringify(verdict.issues)}` : ""}`);
   return { ...verdict, skipped: false };
 }
 

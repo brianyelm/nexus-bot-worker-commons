@@ -32,7 +32,7 @@ export { handleCommandList, FOUNDATION_COMMAND_META } from "./handlers/handleCom
 export { callAnthropic, callAnthropicWithTools } from "./lib/anthropic.js";
 export { withRetry, isRetryableAnthropicError } from "./lib/retry.js";
 export { researchWatercoolerShare, collectSearchResultUrls, verifySharedUrl, parseResearchJson, recoverGroundedUrl, groundUrlsInText } from "./lib/researchShare.js";
-export { judgeContent, judgeContentWithRedraft, parseJudgeVerdict, buildRetryFeedback, FLEET_RUBRICS, JUDGE_PASS_THRESHOLD } from "./lib/contentJudge.js";
+export { judgeContent, judgeContentWithRedraft, parseJudgeVerdict, buildRetryFeedback, FLEET_RUBRICS, JUDGE_PASS_THRESHOLD, SURFACE_PASS_THRESHOLDS, resolvePassThreshold } from "./lib/contentJudge.js";
 export { buildActionBreadcrumb, summarizeToolCall, isReadonlyToolName, looksLikeUnbackedClaim } from "./lib/actionTrace.js";
 export { verifyNexusSignature, timingSafeEqual } from "./lib/callbackSign.js";
 export { parseCommand } from "./lib/commandParser.js";
