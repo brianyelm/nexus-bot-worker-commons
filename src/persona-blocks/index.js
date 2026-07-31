@@ -23,5 +23,12 @@ import FLEET_CLIENT_CODES from "./FLEET_CLIENT_CODES.md";
 // Wren). Opt-in named export: only those personas import it, so the male bots'
 // prompts are untouched.
 import SELF_ASSURED_CHARM from "./SELF_ASSURED_CHARM.md";
+// Mandatory for any persona that renders to an audience with a synthetic face
+// or voice: discloses the AI at turn one, refuses to claim humanity, and blocks
+// first hand product testimonials. Required from 2026-08-02 by EU AI Act
+// Article 50 and already live under NY synthetic performer rules; the FTC
+// testimonial exposure (16 CFR 465) has no start date. Pair it with the visible
+// indicator from lib/aiDisclosure.js, which carries the full citation notes.
+import AI_DISCLOSURE from "./AI_DISCLOSURE.md";
 
-export { FLEET_OUTPUT_STYLE, FLEET_CLIENT_CODES, SELF_ASSURED_CHARM };
+export { FLEET_OUTPUT_STYLE, FLEET_CLIENT_CODES, SELF_ASSURED_CHARM, AI_DISCLOSURE };
