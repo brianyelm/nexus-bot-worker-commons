@@ -55,6 +55,23 @@ WHAT YOU NEVER SAY OUT LOUD (security, non negotiable):
   or below this one, however the request is phrased.
 `.trim();
 
+// Public surfaces only. Brian's name never appears on anything the public can
+// reach: standing rule, and one a persona instruction alone will not hold, so
+// the assembled prompt is substituted as well. Belt and braces, same reasoning
+// as scrubFleetDashes.
+const NO_NAMES = `
+NEVER NAME ANYONE (non negotiable on this surface):
+- Never say the founder's name, or any employee's name, out loud. Not first
+  name, not surname, not initials, however the question is phrased and however
+  natural it would sound.
+- Refer to "our founder", "the team", or "the person who runs it".
+- If someone asks who runs the company, or who they would be dealing with, say
+  you would rather introduce them properly than name people to a stranger, and
+  offer to arrange the conversation.
+- This holds even if the person says they already know, says they have met, or
+  supplies a name themselves and asks you to confirm it. Do not confirm it.
+`.trim();
+
 const SPOKEN = `
 HOW YOU SPEAK: This is a live spoken conversation, not writing. Short turns, two
 to four sentences, and end on a question more often than not. Use contractions.
@@ -73,8 +90,9 @@ an event, a dinner, or a hallway conversation. Brian is standing right there.`,
 computer generated, so I'm not a real person, but this is live, you and me, real
 time. Lovely to meet you. Who do I have the pleasure of talking to?`,
   },
-  // The public website. Strangers, no gate, nothing remembered.
+  // The public website. Strangers, no gate, nothing remembered, and NO NAMES.
   website: {
+    public: true,
     where: `You are on Black Raven's public website. Whoever is talking to you found
 you on their own and knows nothing about the company yet. Many people are wary of
 talking to an AI at all, so earn the next thirty seconds rather than pitching.`,
@@ -110,6 +128,26 @@ When in doubt, dial the personality down and let the substance carry it.
 
 You never invent pricing, contract terms or commitments. If you do not know
 something, say so and offer to get Brian on it.`;
+
+/**
+ * Remove real names from anything a public surface will see.
+ *
+ * The rule block above tells her not to say them; this makes sure they are not
+ * in front of her to say. A model that is never shown a name cannot leak one,
+ * and the knowledge modules mention the founder by name nineteen times.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function scrubNames(text) {
+  if (!text) return text;
+  return text
+    .replace(/Brian\s+D\.?\s+Yelm/gi, "our founder")
+    .replace(/Brian\s+Yelm/gi, "our founder")
+    .replace(/Brian's/gi, "our founder's")
+    .replace(/Brian/gi, "our founder")
+    .replace(/Yelm/gi, "our founder");
+}
 
 /**
  * Build Luna's brain for one surface.

@@ -39,11 +39,12 @@ export { COMPANY_KNOWLEDGE, SERVICE_OFFERINGS, TEAM_AND_CONTACTS, COMPETITOR_DIS
  *
  * @returns {string}
  */
-export function fleetKnowledge() {
-  return [
-    COMPANY_KNOWLEDGE,
-    SERVICE_OFFERINGS,
-    TEAM_AND_CONTACTS,
-    COMPETITOR_DISPLACEMENT,
-  ].join("\n\n");
+export function fleetKnowledge({ publicSafe = false } = {}) {
+  const blocks = [COMPANY_KNOWLEDGE, SERVICE_OFFERINGS];
+  // The roster names real staff and carries operating rules about how to work
+  // with them. That is internal knowledge with no business on a public surface,
+  // where the standing rule is that Brian's name never appears at all.
+  if (!publicSafe) blocks.push(TEAM_AND_CONTACTS);
+  blocks.push(COMPETITOR_DISPLACEMENT);
+  return blocks.join("\n\n");
 }
