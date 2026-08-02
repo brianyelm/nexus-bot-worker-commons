@@ -548,6 +548,21 @@ export async function runLlmPipeline({
   // reused for both recall (inject what we know) and persistence (tag this
   // turn so future recall finds it). Null when MEMORY is unbound.
   let memEntityId = null;
+  // Memory identity + audience for this turn. These MUST stay at function
+  // scope: recall runs inside the media/attachment block below, but the
+  // persist call and the `remember` tool handler both live near the end of
+  // this function, outside it. Declared in that block from 2026-07-03
+  // (1889d9a) to 2026-08-02, they threw a ReferenceError on every turn, caught
+  // and logged as a warning, so recall kept working while NOTHING was written
+  // back for a month across the whole fleet.
+  //
+  // Nexus chat is the INTERNAL staff surface (M365 SSO, blackravenit.com only),
+  // so it writes to the lowercase memory bucket tagged 'internal' and reads
+  // with staff scope 'all' (merged internal + external view). This is the one
+  // surface allowed to see internal memory; client-facing surfaces (email,
+  // phone) omit these opts and get the fail-safe external-only view.
+  const memBotId = (config.botName || "bot").toLowerCase();
+  const MEM_STAFF = { audience: "internal", scope: "all" };
   // Trace of tool calls executed this turn (name + input + error flag), used
   // to build an action breadcrumb for memory and to flag unbacked claims.
   const toolTrace = [];
@@ -812,13 +827,8 @@ export async function runLlmPipeline({
     // the entity for future recall. Best-effort; no-op when MEMORY is unbound or
     // recall is disabled via config.memoryRecall = { enabled: false }.
     let memoryRecallBlock = "";
-    // Nexus chat is the INTERNAL staff surface (M365 SSO, blackravenit.com only),
-    // so it writes to the lowercase memory bucket tagged 'internal' and reads
-    // with staff scope 'all' (merged internal + external view). This is the one
-    // surface allowed to see internal memory; client-facing surfaces (email,
-    // phone) omit these opts and get the fail-safe external-only view.
-    const memBotId = (config.botName || "bot").toLowerCase();
-    const MEM_STAFF = { audience: "internal", scope: "all" };
+    // memBotId / MEM_STAFF are declared at function scope near memEntityId:
+    // persistence and the `remember` tool need them AFTER this block closes.
     if (env.MEMORY && config.botName && config.memoryRecall?.enabled !== false) {
       try {
         memEntityId = await resolveEntity(env, memBotId, { userId: user_id, email: user_email, displayName: display_name }, MEM_STAFF);
