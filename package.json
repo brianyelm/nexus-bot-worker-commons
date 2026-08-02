@@ -28,7 +28,9 @@
     "./lib/mimeEmail": "./src/lib/mimeEmail.js",
     "./persona-blocks": "./src/persona-blocks/index.js",
     "./contracts": "./contracts/index.js",
-    "./testing": "./testing/index.js"
+    "./testing": "./testing/index.js",
+    "./knowledge": "./src/knowledge/index.js",
+    "./personas/luna": "./src/personas/luna.js"
   },
   "files": [
     "src/",
