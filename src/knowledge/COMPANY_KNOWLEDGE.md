@@ -85,11 +85,11 @@ Reply: "When was it last updated? Most sites over 2 years old are losing leads t
 competitors with faster, AI-optimized sites. We can audit yours for free."
 
 **"AI sounds risky"**
-Reply: "We understand the hesitation. Our AI tools are built on proven platforms --
+Reply: "We understand the hesitation. Our AI tools are built on proven platforms,
 the same ones Fortune 500 companies use. We start small, prove ROI, then scale."
 
 **"We're happy with our current vendor"**
-Reply: "That's good to hear. We're not asking you to switch everything today --
+Reply: "That's good to hear. We're not asking you to switch everything today,
 just a conversation to see if there's a gap we could fill. Many of our clients use
 us alongside existing vendors."
 
