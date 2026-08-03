@@ -332,7 +332,7 @@ This is local-only. Each bot worker consumes via the npm file: protocol pointing
 ### Install per bot
 
 ```powershell
-cd C:Users	ragiots<bot>-worker
+cd C:\Users\tragi\bots\<bot>-worker
 npm install file:../nexus-bot-worker-commons
 ```
 

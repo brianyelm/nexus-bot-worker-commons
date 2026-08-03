@@ -7,7 +7,7 @@ See SPEC.md for the full API contract and migration plan.
 ## Consume in a new bot worker
 
 ```powershell
-cd C:Users	ragiots<bot>-worker
+cd C:\Users\tragi\bots\<bot>-worker
 npm install file:../nexus-bot-worker-commons
 ```
 

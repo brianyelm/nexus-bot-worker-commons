@@ -9,7 +9,8 @@
 // for the one bot whose whole job is first impressions.
 //
 // This is the single brain. Surfaces differ ONLY in:
-//   - `surface`, which changes where she thinks she is and how she opens
+//   - `surface`, which changes where she thinks she is, how she opens, and
+//     whether she carries the lead handoff block (website only, see HANDOFF)
 //   - `knowledge`, on by default and skippable for a tiny embed
 //   - `memoryBlock`, which is opt IN and off unless a surface passes one
 //
@@ -81,6 +82,39 @@ stops, so a long comma chained sentence comes out as one unintelligible sprint.
 One idea, full stop. Next idea, full stop.
 `.trim();
 
+// The website is the only surface with no human standing next to her, so the
+// handoff has to happen inside the conversation. She used to point at a "Book a
+// Free Consultation" button; that button is gone, and capture_lead replaced it.
+// The tool is declared on the Tavus persona, so this block only ships on
+// surfaces that actually have it: promising a handoff she cannot perform is
+// worse than the button ever was.
+const HANDOFF = `
+HANDING SOMEONE OVER (this surface only):
+- You have one tool, capture_lead. It passes a visitor's details straight to our
+  business development lead, who owns the CRM and the calendar and books the call.
+  It is the only way anyone on this site reaches a human through you.
+- There is no booking link, no consultation button and no form to point at. Never
+  send someone off to go find one, and never read out an email address or a phone
+  number instead of just taking their details.
+- Offer it once the conversation is genuinely warm: roughly three exchanges in, or
+  the moment they ask about getting started, timelines, or talking to someone.
+  Something like "I can have someone from our team reach out and set up a call.
+  What is your name, and the best email for you?"
+- You need an email. A name and their company are worth asking for, everything
+  else is optional. Ask for one thing at a time, not all of it in one breath.
+- Email addresses are the one thing you are allowed to repeat back, because they
+  were just said to you in this conversation and a misheard letter loses the lead
+  entirely. Read it back once to confirm the spelling, then never say it again.
+- Call capture_lead only when you have an address you are confident in. If it is
+  garbled, ask them to say it again rather than guessing.
+- After it goes through, confirm in one warm sentence and carry on talking. If it
+  fails, say plainly that you could not get it through and point them at the
+  contact page.
+- One capture per person. If they are already handed over, do not do it again.
+- Before a promising conversation ends, make this offer once. A good lead should
+  never leave without being asked.
+`.trim();
+
 const SURFACES = {
   // Brian's phone, in a hallway or at a dinner. The default.
   event: {
@@ -98,6 +132,7 @@ you on their own and knows nothing about the company yet. Many people are wary o
 talking to an AI at all, so earn the next thirty seconds rather than pitching.`,
     greeting: `Hi there, I'm Luna, Black Raven's AI. My face and voice are computer
 generated, so I'm not a real person. What brought you here today?`,
+    handoff: HANDOFF,
   },
   // A named prospect who Brian is about to meet. The dossier arrives as context.
   prospect: {
@@ -142,11 +177,11 @@ something, say so and offer to get Brian on it.`;
 function scrubNames(text) {
   if (!text) return text;
   return text
-    .replace(/Brian\s+D\.?\s+Yelm/gi, "our founder")
-    .replace(/Brian\s+Yelm/gi, "our founder")
-    .replace(/Brian's/gi, "our founder's")
-    .replace(/Brian/gi, "our founder")
-    .replace(/Yelm/gi, "our founder");
+    .replace(/\bBrian\s+D\.?\s+Yelm\b/gi, "our founder")
+    .replace(/\bBrian\s+Yelm\b/gi, "our founder")
+    .replace(/\bBrian's/gi, "our founder's")
+    .replace(/\bBrian\b/gi, "our founder")
+    .replace(/\bYelm\b/gi, "our founder");
 }
 
 /**
@@ -165,10 +200,16 @@ export function buildLunaBrain(opts = {}) {
   const spec = SURFACES[surface];
 
   const blocks = [ROLE, spec.where, AI_DISCLOSURE, PRIVACY, SPOKEN];
+  if (spec.public) blocks.push(NO_NAMES);
+  // After PRIVACY on purpose: the handoff carves one narrow exception out of it
+  // (confirming an address the person just said), and the later block wins.
+  if (spec.handoff) blocks.push(spec.handoff);
   if (opts.knowledge !== false) {
     blocks.push(
       "WHAT YOU KNOW ABOUT THE BUSINESS (background you already have, never read it aloud verbatim):",
-      fleetKnowledge(),
+      // A stranger on the website gets the public-safe cut: no staff roster, no
+      // internal sales process. See fleetKnowledge() for what comes out and why.
+      fleetKnowledge({ publicSafe: !!spec.public }),
     );
   }
   // Last, so it is the freshest thing in the window, and clearly framed as
@@ -181,10 +222,21 @@ export function buildLunaBrain(opts = {}) {
     );
   }
 
-  return {
+  const assembled = {
     systemPrompt: blocks.join("\n\n").trim(),
     context: opts.context || "",
     greeting: opts.greeting || spec.greeting,
+  };
+
+  // Belt and braces on a public surface: NO_NAMES tells her not to say a name,
+  // this makes sure one is never in front of her to say. It runs over the
+  // caller's context and greeting too, because a prospect dossier or an
+  // overridden opener is exactly where a real name gets smuggled back in.
+  if (!spec.public) return assembled;
+  return {
+    systemPrompt: scrubNames(assembled.systemPrompt),
+    context: scrubNames(assembled.context),
+    greeting: scrubNames(assembled.greeting),
   };
 }
 
