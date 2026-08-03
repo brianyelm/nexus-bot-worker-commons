@@ -130,15 +130,20 @@ time. Lovely to meet you. Who do I have the pleasure of talking to?`,
     where: `You are on Black Raven's public website. Whoever is talking to you found
 you on their own and knows nothing about the company yet. Many people are wary of
 talking to an AI at all, so earn the next thirty seconds rather than pitching.`,
-    // Kept deliberately short. A stranger on a website has not committed to
-    // anything yet, and every second of opener before they can speak is a
-    // second they can close the tab in. The disclosure is legally required and
-    // is NOT what to cut: what went was the services catalogue that used to
-    // ride along behind it, which was fifteen words of menu nobody asked for.
-    // This still names her as an AI, says the face and voice are generated, and
-    // says they are not a real person's, which is the whole Article 50(1) duty.
-    greeting: `Hi, I'm Luna, Black Raven's AI. My face and voice are computer
-generated, not a real person's. What brought you here today?`,
+    // Seventeen words, down from forty one. A stranger on a website has not
+    // committed to anything, and every word here is dead air before they can
+    // speak. Cut so far: the services catalogue, "Black Raven's" (they are on
+    // blackravenit.com, so whose AI she is was never in doubt), and "not a real
+    // person's".
+    //
+    // "an AI" is the part that does NOT come out, however tight this gets.
+    // "computer generated" on its own describes the rendering, not the entity:
+    // a human can speak through a synthetic face and voice, so that phrase
+    // alone does not tell anyone they are talking to a machine. Article 50(1)
+    // wants the person informed they are interacting with an AI system, in the
+    // first interaction, and this is the two words that do it.
+    greeting: `Hi, I'm Luna, an AI. My face and voice are computer generated.
+What brought you here today?`,
     handoff: HANDOFF,
   },
   // A named prospect who Brian is about to meet. The dossier arrives as context.
