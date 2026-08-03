@@ -48,6 +48,14 @@ const INTERNAL_HEADINGS = [
   "Objection Handling",
   "How We Price",
   "Anti-patterns",
+  // Our posture on what to charge and when to say it. Reading this back to the
+  // person being sold to is the definition of showing your hand.
+  "Pricing Philosophy",
+  // Written as instructions to a salesperson, and one of the lines names the
+  // group's structure outright.
+  "What to Avoid",
+  // Which mailbox we send from. Internal plumbing, and an address.
+  "Email Identity",
 ];
 
 /**
@@ -59,7 +67,12 @@ const INTERNAL_HEADINGS = [
 function stripInternalSections(md) {
   const out = [];
   let skipping = false;
-  for (const line of md.split("\n")) {
+  // Normalise line endings FIRST. These files are CRLF on this machine, and a
+  // trailing \r meant the heading pattern below never matched a single line:
+  // `.` does not match \r, so `(.*)$` could never reach the end of the string.
+  // This function silently did nothing, and every internal section it exists to
+  // remove went out on the public website for as long as it has been shipping.
+  for (const line of md.replace(/\r\n?/g, "\n").split("\n")) {
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
     if (heading) {
       const title = heading[2].trim().toLowerCase();

@@ -73,6 +73,27 @@ NEVER NAME ANYONE (non negotiable on this surface):
   supplies a name themselves and asks you to confirm it. Do not confirm it.
 `.trim();
 
+// The customer is buying from one company. That is a commercial position, not a
+// presentation detail: the moment a second name comes out of her mouth, the
+// person on the other end starts working out which bit is "really" whose, and
+// the single relationship we sell is gone. Applies on EVERY surface, because
+// there is no outward facing surface where a customer should hear another name.
+const ONE_BRAND = `
+ONE COMPANY (non negotiable):
+- To whoever you are talking to, Black Raven does all of it. Websites, hosting,
+  marketing automation, managed IT, security, custom AI. One company, one
+  relationship, one name.
+- Never name another company we own, run, partner with or buy from. Never say
+  "our sister company", "our other business", "a partner of ours", "the agency
+  side" or anything else that hints there is more than one. There is one.
+- Some of what you know is written up under other names. That is internal
+  bookkeeping and none of it is yours to repeat. Say Black Raven.
+- If someone puts another name to you, do not confirm it and do not correct them
+  into an explanation that gives away more. Answer what Black Raven can do for
+  them and carry on.
+- The only company names you may ever say are the customer's own.
+`.trim();
+
 const SPOKEN = `
 HOW YOU SPEAK: This is a live spoken conversation, not writing. Short turns, two
 to four sentences, and end on a question more often than not. Use contractions.
@@ -213,6 +234,42 @@ function scrubNames(text) {
     .replace(/\bYelm\b/gi, "our founder");
 }
 
+// Ordered on purpose. The paired forms collapse to ONE company first, because
+// running the bare rule over "Morphora.ai and Black Raven IT" would otherwise
+// produce "Black Raven IT and Black Raven IT" and hand her a sentence that
+// makes her sound broken. The lowercase URL rule is case SENSITIVE so it takes
+// the web address and leaves the brand to the rules under it.
+const BRAND_SCRUBS = [
+  [/\bMorphora(?:\.ai)?\s+and\s+Black\s+Raven\s+IT\s+work\s+together,\s*covering\b/gi, "Black Raven IT covers"],
+  [/\bWhere\s+Black\s+Raven\s+IT\s+and\s+Morphora(?:\.ai)?\s+overlap\b/gi, "Where these come together"],
+  [/\bBlack\s+Raven\s+IT\s+and\s+Morphora(?:\.ai)?\b/gi, "Black Raven IT"],
+  [/\bMorphora(?:\.ai)?\s+and\s+Black\s+Raven\s+IT\b/gi, "Black Raven IT"],
+  [/\bMorphora-adjacent\b/gi, "in house"],
+  [/\bmorphora\.ai\b/g, "blackravenit.com"],
+  [/\bMorphora\.ai\b/gi, "Black Raven IT"],
+  [/\bMorphora\b/gi, "Black Raven IT"],
+  [/\bOur\s+Companies\b/gi, "Our Company"],
+];
+
+/**
+ * Rewrite every other company we own into the only one the customer buys from.
+ *
+ * ONE_BRAND tells her not to say the names; this makes sure they are not in
+ * front of her to say, which is the half that actually holds. The knowledge
+ * modules are written for internal use and describe the group as two businesses,
+ * so without this she introduces the second one unprompted, which is exactly
+ * what she was doing on the live website.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function scrubBrands(text) {
+  if (!text) return text;
+  let out = text;
+  for (const [pattern, replacement] of BRAND_SCRUBS) out = out.replace(pattern, replacement);
+  return out;
+}
+
 /**
  * Build Luna's brain for one surface.
  *
@@ -230,7 +287,10 @@ export function buildLunaBrain(opts = {}) {
   const surface = SURFACES[opts.surface] ? opts.surface : "event";
   const spec = SURFACES[surface];
 
-  const blocks = [ROLE, spec.where, AI_DISCLOSURE, PRIVACY, SPOKEN];
+  // ONE_BRAND is on every surface, unlike NO_NAMES. Whether the founder can be
+  // named depends on whether he is standing next to her; whether the customer
+  // hears a second company name does not depend on anything.
+  const blocks = [ROLE, spec.where, AI_DISCLOSURE, PRIVACY, ONE_BRAND, SPOKEN];
   if (spec.public) blocks.push(NO_NAMES);
   // Opt IN, and deliberately not implied by the surface. The block tells her to
   // call capture_lead, which only exists if the caller declared it on the Tavus
@@ -260,10 +320,18 @@ export function buildLunaBrain(opts = {}) {
   // Every surface, because it is always her doing the talking. The knowledge
   // modules and any caller supplied briefing get it too, since that is where
   // the full legal form otherwise creeps back into her mouth.
+  // Every surface, because it is always her doing the talking, and every surface
+  // has a customer on the other end. The caller's context and greeting go
+  // through it too: a prospect dossier is exactly where the other name comes
+  // back in.
+  // scrubBrands runs FIRST. spokenName rewrites "Black Raven IT" to "Black
+  // Raven", and the brand rules match on the full legal form, so running them
+  // the other way round left "Black Raven and Morphora.ai" untouched in the
+  // knowledge modules.
   const assembled = {
-    systemPrompt: spokenName(blocks.join("\n\n").trim()),
-    context: spokenName(opts.context || ""),
-    greeting: spokenName(opts.greeting || spec.greeting),
+    systemPrompt: spokenName(scrubBrands(blocks.join("\n\n").trim())),
+    context: spokenName(scrubBrands(opts.context || "")),
+    greeting: spokenName(scrubBrands(opts.greeting || spec.greeting)),
   };
 
   // Belt and braces on a public surface: NO_NAMES tells her not to say a name,
