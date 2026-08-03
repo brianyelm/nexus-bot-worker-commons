@@ -1864,7 +1864,30 @@ async function runWatercoolerPipeline({ env, channel_slug, config, nameMention, 
  * @param {object} config - Per-bot configuration (see SPEC.md)
  * @returns {Promise<Response>}
  */
+/**
+ * Chat-message callback entry point.
+ *
+ * Establishes the provenance context for the whole turn. Every cron runner is
+ * wrapped by its caller, but this handler was not, so any post made directly in
+ * its body (rather than inside runLlmPipeline / runWatercoolerPipeline / the
+ * !command scope, which wrap themselves) resolved provenance to null. Nexus
+ * rejects those with a 400, and the failure is invisible: no message appears
+ * and the typing indicator never clears, so the bot looks like it is thinking
+ * forever. That is what stopped Maxwell answering Hank's mentions on
+ * 2026-08-03. Inner scopes still override this with their own slug
+ * (user-command for !cmds), since withProvenance nests.
+ *
+ * @param {Request} request
+ * @param {object} env
+ * @param {object} ctx
+ * @param {object} config - bot config
+ * @returns {Promise<Response>}
+ */
 export async function handleChatMessage(request, env, ctx, config) {
+  return withProvenance("mention-reply", () => handleChatMessageInner(request, env, ctx, config));
+}
+
+async function handleChatMessageInner(request, env, ctx, config) {
   // ---- 1. Read raw body ----------------------------------------------------
   let rawBody;
   try {
