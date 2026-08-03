@@ -257,6 +257,17 @@ export async function postToNexus(env, slug, content, options = {}) {
   try {
     const provenance = options.provenance ?? getProvenanceContext() ?? null;
 
+    // Nexus rejects a provenance-less post with a 400, and the resulting
+    // silence is indistinguishable from the bot simply not answering: the
+    // reply never appears and the typing indicator never clears. The old
+    // failure log named only the channel, so tracking down WHICH call site
+    // escaped its withProvenance wrapper meant reading the whole handler.
+    // Name the caller at the point the context is found missing.
+    if (!provenance) {
+      const site = (new Error().stack || "").split("\n").slice(2, 5).join(" | ");
+      console.warn(`[nexus] postToNexus(${slug}) has NO provenance (postedVia=${postedVia}); this post will 400. Caller: ${site}`);
+    }
+
     if (attachmentIds) {
       // Channel-gated Bearer route. Required for attachments; provenance mandatory.
       const payload = { body, attachment_ids: attachmentIds };
