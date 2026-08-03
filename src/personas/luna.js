@@ -281,6 +281,8 @@ function scrubBrands(text) {
  * @param {string} [opts.greeting] - override her opener; must still disclose
  * @param {boolean} [opts.handoff] - true ONLY if capture_lead is declared on the
  *   persona. Off by default: see the gate below for why.
+ * @param {string} [opts.role] - replaces the opening identity paragraph only.
+ *   Everything else in the brain stays put.
  * @returns {{systemPrompt: string, context: string, greeting: string}}
  */
 export function buildLunaBrain(opts = {}) {
@@ -290,7 +292,12 @@ export function buildLunaBrain(opts = {}) {
   // ONE_BRAND is on every surface, unlike NO_NAMES. Whether the founder can be
   // named depends on whether he is standing next to her; whether the customer
   // hears a second company name does not depend on anything.
-  const blocks = [ROLE, spec.where, AI_DISCLOSURE, PRIVACY, ONE_BRAND, SPOKEN];
+  // A caller may replace the opening identity paragraph, and only that. Used by
+  // the site redesign, whose Luna sells a repositioned company: without this a
+  // caller has to fork the whole brain to change three sentences, which is how
+  // the two website personas drifted apart in the first place. Everything after
+  // it, the disclosure, privacy, one brand, names and voice, is not overridable.
+  const blocks = [opts.role || ROLE, spec.where, AI_DISCLOSURE, PRIVACY, ONE_BRAND, SPOKEN];
   if (spec.public) blocks.push(NO_NAMES);
   // Opt IN, and deliberately not implied by the surface. The block tells her to
   // call capture_lead, which only exists if the caller declared it on the Tavus
