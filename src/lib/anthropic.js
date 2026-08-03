@@ -29,6 +29,7 @@
 // =============================================================================
 
 import { withRetry, isRetryableAnthropicError } from "./retry.js";
+import { reportUsage } from "./usageReport.js";
 
 const API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -272,6 +273,11 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
   }
   if (typeof options.onUsage === "function" && data.usage) {
     try { options.onUsage(data.usage); } catch (e) { /* never break main flow */ }
+  } else if (data.usage) {
+    // Default self-report (2026-08-03): callers that do not handle usage
+    // themselves still land in Maxwell's per-bot counts. Callers that DO pass
+    // onUsage (e.g. handleChatMessage) own reporting, so nothing double-counts.
+    reportUsage(env, { usage: data.usage, model, surface: options.surface || "cron" });
   }
   return text;
 }
@@ -482,6 +488,9 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
 
   if (typeof options.onUsage === "function") {
     try { options.onUsage(usageAcc); } catch (e) { /* never break main flow */ }
+  } else {
+    // Default self-report (2026-08-03): see the callAnthropic counterpart.
+    reportUsage(env, { usage: usageAcc, model, surface: options.surface || "cron" });
   }
   return extractText(response);
 }

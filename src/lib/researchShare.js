@@ -25,6 +25,7 @@
 
 import { withRetry, isRetryableAnthropicError } from "./retry.js";
 import { scrubFleetDashes } from "./sanitize.js";
+import { reportUsage } from "./usageReport.js";
 
 const API_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -331,6 +332,15 @@ export async function researchWatercoolerShare(env, opts = {}) {
   const messages = [{ role: "user", content: "Find and write today's share." }];
   let response = await postMessages(env, { ...baseBody, messages }, surface, timeoutMs);
   const allContent = [...response.content];
+  const usageAcc = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 };
+  const accumulateUsage = (usage) => {
+    if (!usage) return;
+    usageAcc.input_tokens += usage.input_tokens || 0;
+    usageAcc.output_tokens += usage.output_tokens || 0;
+    usageAcc.cache_creation_input_tokens += usage.cache_creation_input_tokens || 0;
+    usageAcc.cache_read_input_tokens += usage.cache_read_input_tokens || 0;
+  };
+  accumulateUsage(response.usage);
 
   // Long searches can pause the turn; feed the partial content back so the
   // server-side tool loop continues where it left off.
@@ -340,7 +350,13 @@ export async function researchWatercoolerShare(env, opts = {}) {
     messages.push({ role: "assistant", content: response.content });
     response = await postMessages(env, { ...baseBody, messages }, surface, timeoutMs);
     allContent.push(...response.content);
+    accumulateUsage(response.usage);
   }
+
+  // Watercooler research was a fleet-wide blind spot in Maxwell's per-bot
+  // counts (Sonnet/Haiku + web_search, four bots share this path). Report
+  // before parsing so even a dropped ungrounded share still counts its spend.
+  reportUsage(env, { usage: usageAcc, model, surface });
 
   const finalText = (response.content || [])
     .filter(b => b.type === "text")

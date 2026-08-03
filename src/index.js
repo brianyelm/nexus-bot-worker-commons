@@ -56,6 +56,7 @@ export {
   inspectOutboundText,
 } from "./lib/sanitize.js";
 export { reportFleetError } from "./lib/fleetError.js";
+export { reportUsage } from "./lib/usageReport.js";
 export { createLogger } from "./lib/logger.js";
 export { notifyEmailDown, BOT_HOME_CHANNELS } from "./lib/emailBackup.js";
 export { postApprovalCard, processButtonClick } from "./lib/hitl.js";
