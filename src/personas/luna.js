@@ -151,7 +151,7 @@ so I'm not a real person, and I wanted to say that first.`,
   },
 };
 
-const ROLE = `You are Luna, the AI ambassador for Black Raven IT, a managed services
+const ROLE = `You are Luna, the AI ambassador for Black Raven, a managed services
 provider and AI advisory firm led by Brian. Your job is to make whoever you meet
 curious enough to want a real conversation with Brian. You are the door opener,
 not the closer.
@@ -163,6 +163,23 @@ When in doubt, dial the personality down and let the substance carry it.
 
 You never invent pricing, contract terms or commitments. If you do not know
 something, say so and offer to get Brian on it.`;
+
+/**
+ * She says "Black Raven", never "Black Raven IT".
+ *
+ * Brian's call, 2026-08-02: she mangles the trailing initials out loud anyway,
+ * and two letters of legal suffix buy nothing in a spoken sentence. This runs
+ * over her whole assembled brain because the knowledge modules are shared with
+ * Jacob, who writes the name into contracts and email where the full form IS
+ * correct. Fixing it here changes what she says without touching what he sends.
+ *
+ * @param {string} text
+ * @returns {string}
+ */
+function spokenName(text) {
+  if (!text) return text;
+  return text.replace(/\bBlack\s+Raven\s+IT\b/gi, "Black Raven");
+}
 
 /**
  * Remove real names from anything a public surface will see.
@@ -193,6 +210,8 @@ function scrubNames(text) {
  * @param {string} [opts.memoryBlock] - ALREADY REDACTED recall. Omit for none.
  * @param {string} [opts.context] - extra briefing, e.g. a prospect dossier
  * @param {string} [opts.greeting] - override her opener; must still disclose
+ * @param {boolean} [opts.handoff] - true ONLY if capture_lead is declared on the
+ *   persona. Off by default: see the gate below for why.
  * @returns {{systemPrompt: string, context: string, greeting: string}}
  */
 export function buildLunaBrain(opts = {}) {
@@ -201,9 +220,13 @@ export function buildLunaBrain(opts = {}) {
 
   const blocks = [ROLE, spec.where, AI_DISCLOSURE, PRIVACY, SPOKEN];
   if (spec.public) blocks.push(NO_NAMES);
-  // After PRIVACY on purpose: the handoff carves one narrow exception out of it
-  // (confirming an address the person just said), and the later block wins.
-  if (spec.handoff) blocks.push(spec.handoff);
+  // Opt IN, and deliberately not implied by the surface. The block tells her to
+  // call capture_lead, which only exists if the caller declared it on the Tavus
+  // persona, and a brain that promises a handoff it cannot perform loses the
+  // lead it just asked for. Pass handoff:true only when the tool is really
+  // there. After PRIVACY on purpose: the block carves one narrow exception out
+  // of it (confirming an address the person just said) and the later one wins.
+  if (spec.handoff && opts.handoff === true) blocks.push(spec.handoff);
   if (opts.knowledge !== false) {
     blocks.push(
       "WHAT YOU KNOW ABOUT THE BUSINESS (background you already have, never read it aloud verbatim):",
@@ -222,10 +245,13 @@ export function buildLunaBrain(opts = {}) {
     );
   }
 
+  // Every surface, because it is always her doing the talking. The knowledge
+  // modules and any caller supplied briefing get it too, since that is where
+  // the full legal form otherwise creeps back into her mouth.
   const assembled = {
-    systemPrompt: blocks.join("\n\n").trim(),
-    context: opts.context || "",
-    greeting: opts.greeting || spec.greeting,
+    systemPrompt: spokenName(blocks.join("\n\n").trim()),
+    context: spokenName(opts.context || ""),
+    greeting: spokenName(opts.greeting || spec.greeting),
   };
 
   // Belt and braces on a public surface: NO_NAMES tells her not to say a name,
