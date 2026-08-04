@@ -41,6 +41,11 @@ export const BUTTON_LABELS = Object.freeze({
   discard:  { label: "Discard",       style: "danger"    },
   retry:    { label: "Retry",         style: "primary"   },
   snooze:   { label: "Snooze",        style: "secondary" },
+  // Runs a READ-ONLY lookup on click and posts the result back to the channel.
+  // Unlike every other verb here it decides nothing and changes nothing, so
+  // handlers for it must not sit behind an approver gate: any staff member
+  // clicking it is just asking to see data the card already summarised.
+  reveal:   { label: "Show details",  style: "primary"   },
 });
 
 /** Verbs accepted by parseButtonId but not in BUTTON_LABELS (legacy paths). */

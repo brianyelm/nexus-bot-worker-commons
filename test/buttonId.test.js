@@ -11,9 +11,9 @@ import {
   isCanonicalLabel,
 } from "../src/lib/buttonId.js";
 
-test("BUTTON_LABELS contains all 9 canonical verbs", () => {
+test("BUTTON_LABELS contains all 10 canonical verbs", () => {
   const keys = Object.keys(BUTTON_LABELS).sort();
-  assert.deepEqual(keys, ["ack","approve","deny","discard","edit","retry","send","skip","snooze"]);
+  assert.deepEqual(keys, ["ack","approve","deny","discard","edit","retry","reveal","send","skip","snooze"]);
   for (const k of keys) {
     assert.ok(BUTTON_LABELS[k].label, `verb ${k} has a label`);
     assert.ok(BUTTON_LABELS[k].style, `verb ${k} has a style`);
