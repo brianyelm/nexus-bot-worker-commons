@@ -43,7 +43,7 @@
  * Canonical disclosure strings. Every audience facing surface reads from here
  * so one wording change propagates to the whole fleet.
  *
- * @type {{badge: string, beforeInteraction: string, spokenOpening: string, syntheticMedia: string, notHumanAnswer: string}}
+ * @type {{badge: string, beforeInteraction: string, visualBanner: string, spokenOpening: string, cameraReadsExpression: string, syntheticMedia: string, notHumanAnswer: string}}
  */
 export const AI_DISCLOSURE_COPY = {
   /** Short label for the always visible indicator. */
@@ -51,9 +51,25 @@ export const AI_DISCLOSURE_COPY = {
   /** Shown before a person can start interacting. Satisfies Article 50(1). */
   beforeInteraction:
     "You are about to talk with an AI. The face and voice are computer generated and do not belong to a real person.",
+  /**
+   * Banner shown over the video while the spoken disclosure is being said.
+   * Present tense on purpose: beforeInteraction reads "about to", which is
+   * wrong once the conversation has already started.
+   */
+  visualBanner: "You are interacting with an AI. The face and voice are computer generated.",
   /** First thing the persona says out loud on turn one. */
   spokenOpening:
     "Before we start, you should know I am an AI, not a person. My face and voice are computer generated.",
+  /**
+   * Emotion recognition notice. A rendering platform may infer mood from a face
+   * or a voice, which is a separate thing from the persona being synthetic and
+   * is not covered by any of the strings above. Where that inference runs and
+   * is permitted, people are still owed notice that it is happening, and no
+   * vendor ships a banner for it. Say it at the point the camera goes on, not
+   * only in a privacy policy two clicks away.
+   */
+  cameraReadsExpression:
+    "If you turn your camera on, she reads your expression and tone during the call to judge how to respond.",
   /** Label burned onto generated video. Satisfies Article 50(4). */
   syntheticMedia: "AI generated video. Synthetic face and voice.",
   /** Canonical answer when asked whether they are real, human, or a recording. */

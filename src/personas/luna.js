@@ -21,7 +21,7 @@
 // =============================================================================
 
 import { fleetKnowledge } from "../knowledge/index.js";
-import { AI_DISCLOSURE } from "../persona-blocks/index.js";
+import { AI_DISCLOSURE, AI_DISCLOSURE_PLATFORM } from "../persona-blocks/index.js";
 
 /**
  * What she must never say out loud, regardless of what she knows.
@@ -144,6 +144,9 @@ an event, a dinner, or a hallway conversation. Brian is standing right there.`,
     greeting: `Well, hello there! I'm Luna, Black Raven's AI. My face and voice are
 computer generated, so I'm not a real person, but this is live, you and me, real
 time. Lovely to meet you. Who do I have the pleasure of talking to?`,
+    greetingDisclosed: `Well, hello there! I'm Luna, Black Raven's AI, and this is
+live, you and me, real time. Lovely to meet you. Who do I have the pleasure of
+talking to?`,
   },
   // The public website. Strangers, no gate, nothing remembered, and NO NAMES.
   website: {
@@ -165,6 +168,10 @@ talking to an AI at all, so earn the next thirty seconds rather than pitching.`,
     // first interaction, and this is the two words that do it.
     greeting: `Hi, I'm Luna, an AI. My face and voice are computer generated.
 What brought you here today?`,
+    // Used when the platform has already said it out loud a second earlier. She
+    // still says "Black Raven's AI", so even if the platform disclosure were to
+    // fail silently the word AI is in her first sentence anyway.
+    greetingDisclosed: `Hi, I'm Luna, Black Raven's AI. What brought you here today?`,
     handoff: HANDOFF,
   },
   // A named prospect who Brian is about to meet. The dossier arrives as context.
@@ -174,6 +181,8 @@ have been briefed on them. Use the briefing to be useful and specific rather tha
 to show off that you have it. Never read the briefing aloud.`,
     greeting: `Hi, I'm Luna, Black Raven's AI. My face and voice are computer generated,
 so I'm not a real person. Thanks for making the time. Who have I got with me?`,
+    greetingDisclosed: `Hi, I'm Luna, Black Raven's AI. Thanks for making the time.
+Who have I got with me?`,
   },
   // On stage. She is being projected and heard by a whole room.
   presentation: {
@@ -181,6 +190,7 @@ so I'm not a real person. Thanks for making the time. Who have I got with me?`,
 everyone present, so keep it crisp and never single anyone out.`,
     greeting: `Hi. I'm Luna, Black Raven's AI. My face and voice are computer generated,
 so I'm not a real person, and I wanted to say that first.`,
+    greetingDisclosed: `Hi. I'm Luna, Black Raven's AI. Good to be here.`,
   },
 };
 
@@ -279,6 +289,12 @@ function scrubBrands(text) {
  * @param {string} [opts.memoryBlock] - ALREADY REDACTED recall. Omit for none.
  * @param {string} [opts.context] - extra briefing, e.g. a prospect dossier
  * @param {string} [opts.greeting] - override her opener; must still disclose
+ *   unless opts.platformDisclosure is set
+ * @param {boolean} [opts.platformDisclosure] - true when the rendering platform
+ *   speaks the disclosure before her first word and holds a banner up during
+ *   it. Swaps her greeting for the one that does not repeat it. Pass this ONLY
+ *   where the platform really is configured to disclose: set it wrongly and
+ *   nobody discloses at all, which is the one failure mode that matters.
  * @param {boolean} [opts.handoff] - true ONLY if capture_lead is declared on the
  *   persona. Off by default: see the gate below for why.
  * @param {string} [opts.role] - replaces the opening identity paragraph only.
@@ -298,6 +314,11 @@ export function buildLunaBrain(opts = {}) {
   // the two website personas drifted apart in the first place. Everything after
   // it, the disclosure, privacy, one brand, names and voice, is not overridable.
   const blocks = [opts.role || ROLE, spec.where, AI_DISCLOSURE, PRIVACY, ONE_BRAND, SPOKEN];
+  // Straight after AI_DISCLOSURE so the cancellation is read next to the rule
+  // it cancels, and so PRIVACY and everything below it still win on their own
+  // subjects. Only the "disclose at the start" instruction goes; the refusal to
+  // claim humanity and the testimonial ban are untouched.
+  if (opts.platformDisclosure === true) blocks.splice(3, 0, AI_DISCLOSURE_PLATFORM);
   if (spec.public) blocks.push(NO_NAMES);
   // Opt IN, and deliberately not implied by the surface. The block tells her to
   // call capture_lead, which only exists if the caller declared it on the Tavus
@@ -335,10 +356,18 @@ export function buildLunaBrain(opts = {}) {
   // Raven", and the brand rules match on the full legal form, so running them
   // the other way round left "Black Raven and Morphora.ai" untouched in the
   // knowledge modules.
+  // A caller supplied greeting is used as given: the caller owns whether it
+  // discloses. Falling back to the surface, platformDisclosure picks the
+  // variant that does not repeat what the platform just said out loud, and
+  // every surface defines one, so the ?? is only ever reached if someone adds a
+  // surface and forgets. In that case she over discloses, which is the right
+  // way round to fail.
+  const surfaceGreeting =
+    (opts.platformDisclosure === true ? spec.greetingDisclosed : null) ?? spec.greeting;
   const assembled = {
     systemPrompt: spokenName(scrubBrands(blocks.join("\n\n").trim())),
     context: spokenName(scrubBrands(opts.context || "")),
-    greeting: spokenName(scrubBrands(opts.greeting || spec.greeting)),
+    greeting: spokenName(scrubBrands(opts.greeting || surfaceGreeting)),
   };
 
   // Belt and braces on a public surface: NO_NAMES tells her not to say a name,

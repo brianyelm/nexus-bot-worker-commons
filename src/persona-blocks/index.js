@@ -30,5 +30,17 @@ import SELF_ASSURED_CHARM from "./SELF_ASSURED_CHARM.md";
 // testimonial exposure (16 CFR 465) has no start date. Pair it with the visible
 // indicator from lib/aiDisclosure.js, which carries the full citation notes.
 import AI_DISCLOSURE from "./AI_DISCLOSURE.md";
+// Appended AFTER AI_DISCLOSURE, and only on a surface where the rendering
+// platform speaks the disclosure itself before the persona's first word. It
+// cancels exactly one instruction, "open your first turn by disclosing", and
+// leaves every other rule in that block standing. Without it the platform and
+// the persona both disclose and she says it twice in ten seconds.
+import AI_DISCLOSURE_PLATFORM from "./AI_DISCLOSURE_PLATFORM.md";
 
-export { FLEET_OUTPUT_STYLE, FLEET_CLIENT_CODES, SELF_ASSURED_CHARM, AI_DISCLOSURE };
+export {
+  FLEET_OUTPUT_STYLE,
+  FLEET_CLIENT_CODES,
+  SELF_ASSURED_CHARM,
+  AI_DISCLOSURE,
+  AI_DISCLOSURE_PLATFORM,
+};
