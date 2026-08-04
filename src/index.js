@@ -114,6 +114,22 @@ export {
 } from "./lib/aiDisclosure.js";
 export { buildReportPrompt } from "./lib/reportPrompt.js";
 export {
+  BRAND,
+  CHANNELS,
+  CHANNEL_CYCLE,
+  FONT_DISPLAY,
+  FONT_MONO,
+  FONT_LINK,
+  LOGO_URL,
+  NAMEPLATE_URL,
+  AURORA_URL,
+  BRAND_NAME,
+  LEGAL_NAME,
+  SITE_URL,
+  POSTAL_ADDRESS,
+  LEGAL_FOOTER,
+} from "./lib/brand.js";
+export {
   fmtDate,
   fmtTime,
   fmtDateTime,

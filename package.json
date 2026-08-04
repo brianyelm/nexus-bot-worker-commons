@@ -30,7 +30,8 @@
     "./contracts": "./contracts/index.js",
     "./testing": "./testing/index.js",
     "./knowledge": "./src/knowledge/index.js",
-    "./personas/luna": "./src/personas/luna.js"
+    "./personas/luna": "./src/personas/luna.js",
+    "./lib/brand": "./src/lib/brand.js"
   },
   "files": [
     "src/",
