@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  bangReport, bangAlert, buildReport, previewOf, safeEmbedTitle,
+  bangReport, bangAlert, buildReport, chunkBangReport, previewOf, safeEmbedTitle,
 } from "../src/lib/embedCard.js";
 import { buildReportPrompt } from "../src/lib/reportPrompt.js";
 import { PALETTE } from "../src/lib/format.js";
@@ -190,4 +190,27 @@ test("buildReportPrompt embeds bulleted emoji+bold headers and rules", () => {
   assert.match(user, /newThreats/);
   assert.match(user, /heartbeat count/);
   assert.match(user, /Do not use `#`, `##`, or `###`/);
+});
+
+test("chunkBangReport leaves a short report as one part", () => {
+  const out = bangReport({ botName: "Courtney", verb: "breachscan", sections: ["one line"] });
+  const parts = chunkBangReport(out);
+  assert.equal(parts.length, 1);
+  assert.equal(parts[0], out);
+});
+
+test("chunkBangReport splits a long report and keeps every row", () => {
+  const rows = Array.from({ length: 600 }, (_, i) => `user${i}@example.com  hunter${i}  HIGH  source-${i}`);
+  const out = bangReport({ botName: "Courtney", verb: "breachscan", sections: [rows.join("\n")] });
+  assert.ok(out.length > 8000, "fixture must exceed the Nexus body limit");
+  const parts = chunkBangReport(out);
+  assert.ok(parts.length > 1, "long report must split");
+  for (const part of parts) {
+    assert.ok(part.length <= 8000, "each part must fit under the postToNexus cap");
+    assert.match(part, /^```\n/);
+    assert.match(part, /\n```$/);
+    assert.match(part, /\(part \d+ of \d+\)/);
+  }
+  const joined = parts.join("\n");
+  for (const row of rows) assert.ok(joined.includes(row), `row lost in chunking: ${row}`);
 });

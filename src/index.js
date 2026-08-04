@@ -103,6 +103,7 @@ export {
   bangReport,
   bangAlert,
   buildReport,
+  chunkBangReport,
   previewOf,
   BANG_REPORT_RULES,
 } from "./lib/embedCard.js";

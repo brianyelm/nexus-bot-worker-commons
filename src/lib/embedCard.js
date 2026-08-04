@@ -80,6 +80,60 @@ export function bangReport({ botName, verb, args, sections, subtitle } = {}) {
 
 export const BANG_REPORT_RULES = { HEADER_RULE, SECTION_RULE };
 
+// postToNexus hard-truncates a message body at 8000 chars, silently. A report
+// longer than that loses its tail with no marker, which reads as a complete
+// report that simply ends. Anything row-oriented and unbounded (breach records,
+// device lists, audit tables) must be split before posting, not after.
+const NEXUS_BODY_LIMIT = 8000;
+const CHUNK_SAFETY_MARGIN = 400; // fences, continuation header, rounding
+
+/**
+ * Split an already-built bangReport into as many code-block-wrapped messages as
+ * it takes to carry every line. Splits only on line boundaries, and stamps each
+ * part with "part N of M" so a reader can tell the report continues.
+ *
+ * Post the returned parts IN ORDER, one postToNexus / ctx.reply call each.
+ *
+ * @param {string} report - output of bangReport (code-block wrapped) or raw text
+ * @param {object} [opts]
+ * @param {number} [opts.limit] - max chars per message (default 8000)
+ * @returns {string[]} one or more code-block-wrapped message bodies
+ */
+export function chunkBangReport(report, opts = {}) {
+  const limit = Math.max(1000, opts.limit || NEXUS_BODY_LIMIT) - CHUNK_SAFETY_MARGIN;
+  const raw = String(report ?? "");
+  if (raw.length <= limit) return [raw];
+
+  const fenced = raw.startsWith("```");
+  const inner = fenced ? raw.replace(/^```\n?/, "").replace(/\n?```$/, "") : raw;
+  const lines = inner.split("\n");
+
+  const pages = [];
+  let current = [];
+  let currentLen = 0;
+  for (const line of lines) {
+    // A single line longer than the limit still has to ship; give it its own
+    // page rather than dropping it.
+    const lineLen = line.length + 1;
+    if (currentLen + lineLen > limit && current.length > 0) {
+      pages.push(current);
+      current = [];
+      currentLen = 0;
+    }
+    current.push(line);
+    currentLen += lineLen;
+  }
+  if (current.length > 0) pages.push(current);
+
+  const total = pages.length;
+  return pages.map((pageLines, i) => {
+    const header = `(part ${i + 1} of ${total})`;
+    const body = i === 0 ? [pageLines[0], header, ...pageLines.slice(1)] : [header, ...pageLines];
+    const joined = body.join("\n");
+    return fenced ? "```\n" + joined + "\n```" : joined;
+  });
+}
+
 /**
  * bangAlert — non-command variant of bangReport for cron jobs, pollers, and
  * webhook handlers. Same output shape as bangReport (code-block-wrapped,

@@ -19,6 +19,13 @@
 
 import FLEET_OUTPUT_STYLE from "./FLEET_OUTPUT_STYLE.md";
 import FLEET_CLIENT_CODES from "./FLEET_CLIENT_CODES.md";
+// Canonical who-owns-what across the fleet. Every persona imports this. Without
+// it a bot asked for a capability it lacks invents a teammate who has it, which
+// is how a Dehashed request got bounced Courtney -> Dexter -> Robert in August
+// 2026 and landed on the one bot with no breach tooling at all. Update this file
+// whenever a bot gains or loses a capability domain; do not restate ownership
+// inside individual personas.
+import FLEET_CAPABILITY_MAP from "./FLEET_CAPABILITY_MAP.md";
 // Confidence + grace block for the women on the fleet (Courtney, Kate, Moxie,
 // Wren). Opt-in named export: only those personas import it, so the male bots'
 // prompts are untouched.
@@ -40,6 +47,7 @@ import AI_DISCLOSURE_PLATFORM from "./AI_DISCLOSURE_PLATFORM.md";
 export {
   FLEET_OUTPUT_STYLE,
   FLEET_CLIENT_CODES,
+  FLEET_CAPABILITY_MAP,
   SELF_ASSURED_CHARM,
   AI_DISCLOSURE,
   AI_DISCLOSURE_PLATFORM,
