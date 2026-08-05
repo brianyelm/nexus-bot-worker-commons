@@ -49,6 +49,10 @@ export { postToNexus, uploadBotAttachment, attachImagesFromUrls, attachButtons, 
 export { withProvenance, getProvenanceContext } from "./lib/provenanceContext.js";
 export { crmReadTools, crmReadHandlers } from "./lib/crmCodes.js";
 export {
+  kbProfileReadTools, kbProfileReadHandlers,
+  kbProfileWriteTools, kbProfileWriteHandlers,
+} from "./lib/kbClientProfiles.js";
+export {
   scrubFleetDashes,
   detectEmDashLeak,
   detectBareCapsHeader,

@@ -34,9 +34,12 @@ THIS map, never from a guess.
 
 **Courtney Raven** (IT support, service desk, onboarding)
 Service Desk tickets (create, update, assign, escalate, merge, time and
-expense). NinjaRMM ticket reads. Knowledge base articles. Trello boards.
-Client onboarding cadence and welcome mail. Reboot nags. DNSFilter org
-mapping and allowlist requests. **Dehashed breach scans**, including
+expense). NinjaRMM ticket reads. Knowledge base articles. **KB client
+profiles: she MAINTAINS the store** (`kb_upsert_client_profile`,
+`kb_add_client_site` / `_network` / `_infrastructure` / `_reference` /
+`_contact`, `kb_assign_unclaimed_ip`, `kb_mark_staff_ip`, plus all reads).
+Trello boards. Client onboarding cadence and welcome mail. Reboot nags.
+DNSFilter org mapping and allowlist requests. **Dehashed breach scans**, including
 `!breachscan`, `!breachreport`, `!breachvip`, `!breachaudit`,
 `!breachprospect`, `!breachhelp`. Support, hello, and her own mailbox.
 
@@ -45,7 +48,8 @@ NinjaRMM devices, patching, EOL and stale devices, device counts. Cloudflare
 DNS records and redirects (our zones only). Datto and Axcient backup health.
 Pax8 subscriptions. GoDaddy domains. M365 and Graph tenant reads plus GDAP.
 Uptime monitors. API key and secret rotation tracking. PowerShell script
-library. Xero read-only lookups. **Dehashed breach scans** via `breach scan
+library. Xero read-only lookups. KB client profile reads
+(`kb_get_client_profile`, `kb_lookup_client_by_ip`, network lists). **Dehashed breach scans** via `breach scan
 <domain>` and the monthly per-client breach alert cron.
 
 **Robert Raven** (SOC, security operations)
@@ -54,7 +58,10 @@ Visibility, isolate and remediate under consent gating. IOC enrichment,
 MITRE mapping, unified timelines. **External email-auth posture** (SPF,
 DKIM, DMARC, spoofability) and public DNS posture findings. Incidents,
 breach-notification assessment, compliance impact, SLA and FP metrics.
-On-call SMS paging.
+On-call SMS paging. KB client profile reads, most importantly
+`kb_lookup_client_by_ip`: resolve EVERY source IP through it before
+classifying a geo or impossible-travel anomaly, and cite the confidence.
+He also pushes observed Entra egress IPs into the KB unclaimed queue.
 Robert has NO Dehashed or credential-breach lookup. Breach exposure scans
 are Courtney and Dexter. Do not send credential-exposure work to Robert.
 
@@ -108,3 +115,10 @@ to Flynn.
 - **"Cadence"** means three different things: Jacob's cold outbound, Wren's
   event intros, Moxie's posting schedule.
 - **The CRM** is read-only for everyone except Jacob.
+- **KB client profiles** (the structured per-client network/infra store at
+  kb.blackravenit.com, distinct from KB articles): Courtney maintains it,
+  Robert reads it for alert triage and pushes observed egress IPs into its
+  unclaimed queue, Dexter reads it. Nobody else has it. The data is
+  INTERNAL ONLY: it is shared in Nexus and nowhere else, never in email,
+  SMS, phone calls, or any client-facing output, and it never contains a
+  secret (credential fields are Keeper pointers).
