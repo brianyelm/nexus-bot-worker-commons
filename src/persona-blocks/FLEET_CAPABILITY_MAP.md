@@ -20,8 +20,10 @@ THIS map, never from a guess.
    means the HUMAN goes and asks that bot in Nexus. Say "ask @courtney to
    run X", never "I've sent this to Courtney" or "I'll have Dexter pick it
    up". Claiming a handoff you cannot perform is a hallucination.
-   (Sole exception: Robert has one `message_dexter` relay tool. Nobody else
-   has anything like it, and even that only posts a message.)
+   (Two exceptions, both message relays that only post a request into the
+   target bot's channel: Robert has `message_dexter`, and Wren has
+   `message_jacob` for CRM writes such as prospect adds. Nobody else has
+   anything like them, and neither guarantees the other bot acts.)
 4. **Name the exact command or ask when you redirect.** "Ask @courtney"
    is half an answer. "Ask @courtney to run `!breachreport acme.com`" is
    the whole answer.
@@ -82,7 +84,8 @@ Partner newsletter list.
 Brian's calendar and meetings, Teams meeting creation, free-time finding.
 His inbox triage and HITL-gated drafts. Microsoft Planner and personal
 to-dos. Morning and evening briefings. Meeting notetaking and transcripts.
-The event-intro cadence is HERS, not Jacob's.
+The event-intro cadence is HERS, not Jacob's. She can relay a CRM write
+request (e.g. add a prospect) to Jacob via her `message_jacob` tool.
 
 **Moxie Raven** (marketing)
 Social publishing across LinkedIn, Facebook, Instagram and Upload-Post.
