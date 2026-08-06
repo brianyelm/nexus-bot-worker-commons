@@ -11,6 +11,7 @@ import {
   stageExternalReply,
   handleExternalReplyGate,
   handleExternalReplyModal,
+  replySubject,
 } from "../src/lib/externalReplyGate.js";
 import { withProvenance } from "../src/lib/provenanceContext.js";
 
@@ -110,6 +111,73 @@ test("edit modal is attached as the send path with a textarea cc field", async (
   const body = modal.fields.find(f => f.name === "body");
   assert.equal(body.type, "textarea");
   assert.equal(body.required, true);
+});
+
+test("edit modal carries the full Courtney field set", async () => {
+  const { calls } = await stageOnce();
+  const modal = modalsCall(calls).body.modals[0];
+  assert.deepEqual(modal.fields.map(f => f.name), ["to", "cc", "subject", "body"]);
+  const to = modal.fields.find(f => f.name === "to");
+  assert.equal(to.type, "text");
+  assert.equal(to.value, "vendor@example.com", "To prefills with the person being replied to");
+  const subject = modal.fields.find(f => f.name === "subject");
+  assert.equal(subject.type, "text");
+  assert.equal(subject.value, "RE: Your subscription renews", "Subject prefills with what createReply will build");
+});
+
+test("replySubject prefixes once and never double-prefixes", () => {
+  assert.equal(replySubject("Invoice 12"), "RE: Invoice 12");
+  assert.equal(replySubject("RE: Invoice 12"), "RE: Invoice 12");
+  assert.equal(replySubject("re: invoice 12"), "re: invoice 12");
+  assert.equal(replySubject(""), "RE:");
+});
+
+test("an untouched To and Subject set no override, so the thread is left alone", async () => {
+  const { env, result } = await stageOnce();
+  const restore = captureFetch([]);
+  let seen = null;
+  try {
+    await handleExternalReplyModal(env, {
+      modal_id: `extmail-edit:${result.messageId}`,
+      message_id: result.messageId,
+      display_name: "Brian",
+      values: {
+        to: "vendor@example.com",
+        cc: "",
+        subject: "RE: Your subscription renews",
+        body: "Fine as drafted.",
+      },
+    }, { nexusKeyEnvVar: "TEST_KEY", sendReply: async (e, pending) => { seen = pending; } });
+  } finally {
+    restore();
+  }
+  assert.equal(seen.toOverride, undefined, "no toRecipients PATCH on an unedited reply");
+  assert.equal(seen.subjectOverride, undefined, "no subject PATCH on an unedited reply");
+});
+
+test("an edited To and Subject reach sendReply as explicit overrides", async () => {
+  const { env, result } = await stageOnce();
+  const restore = captureFetch([]);
+  let seen = null;
+  try {
+    const out = await handleExternalReplyModal(env, {
+      modal_id: `extmail-edit:${result.messageId}`,
+      message_id: result.messageId,
+      display_name: "Brian",
+      values: {
+        to: "ap@example.com, boss@example.com",
+        cc: "billing@example.com",
+        subject: "RE: Your subscription renews (routed to AP)",
+        body: "Sending you to AP.",
+      },
+    }, { nexusKeyEnvVar: "TEST_KEY", sendReply: async (e, pending) => { seen = pending; } });
+    assert.equal(out.action, "sent");
+  } finally {
+    restore();
+  }
+  assert.deepEqual(seen.toOverride, ["ap@example.com", "boss@example.com"]);
+  assert.equal(seen.subjectOverride, "RE: Your subscription renews (routed to AP)");
+  assert.equal(seen.to, "ap@example.com, boss@example.com", "the settle line names the real recipients");
 });
 
 test("channel comes from routeApprovalChannel, not the primary channel", async () => {

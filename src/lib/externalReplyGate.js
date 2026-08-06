@@ -13,8 +13,9 @@
 // GRAMMAR (Brian 2026-08-06, aligned to Courtney's emailGate): there is no
 // blind Approve & Send. A card carries Reject plus an "Edit reply and send"
 // modal, and the modal is the ONLY send path, so a human reads the reply before
-// it leaves. Cards staged before that date still carry the old Approve button;
-// the legacy branch below keeps them working until their KV rows expire.
+// it leaves. The modal offers the full Courtney field set, To, CC, Subject and
+// body, all editable. Cards staged before that date still carry the old Approve
+// button; the legacy branch below keeps them working until their KV rows expire.
 //
 // Two failure-mode rules this file exists to enforce, both learned the hard way:
 //
@@ -86,6 +87,20 @@ export function textToHtml(text) {
 /** Split a reviewer-typed address list on commas, semicolons or whitespace. */
 function parseAddresses(value) {
   return String(value || "").split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
+}
+
+/**
+ * The subject Graph's createReply will generate for this thread. Used as the
+ * modal prefill so the reviewer sees what will actually go out, and as the
+ * baseline for deciding whether they changed it.
+ *
+ * @param {string} subject - Inbound subject line.
+ * @returns {string} Reply subject.
+ */
+export function replySubject(subject) {
+  const s = String(subject || "").trim();
+  if (!s) return "RE:";
+  return /^re:/i.test(s) ? s : `RE: ${s}`;
 }
 
 /**
@@ -235,18 +250,23 @@ export async function stageExternalReply(env, opts) {
     { button_id: `${buttonPrefix}_reject:${messageId}`, label: "Reject", style: "danger", callback_url: `${workerBaseUrl}/api/internal/button-click` },
   ], nexusOpts).catch(err => console.warn(`[externalReplyGate] attachButtons failed: ${err.message}`));
 
-  // Only CC and body are editable. This is a THREAD reply built with Graph
-  // createReply, so the recipient and subject are fixed by the thread itself;
-  // offering fields whose edits get silently discarded would be worse than not
-  // offering them. Redirecting a reply elsewhere means Reject plus a fresh mail.
+  // All four Courtney fields (Brian 2026-08-06). An earlier cut of this gate
+  // offered only CC and body, reasoning that a Graph createReply thread fixes
+  // the recipient and subject. It does not: createReply returns a DRAFT, and
+  // the draft is already PATCHed here to insert the body, so toRecipients and
+  // subject ride along in the same PATCH. The consumer's sendReply applies an
+  // override only when the reviewer actually changed the field, so an untouched
+  // reply still threads exactly as before.
   await attachModals(env, messageId, [{
     modal_id: `${buttonPrefix}-edit:${messageId}`,
     title: "Edit reply and send",
     fields: [
+      { name: "to", label: "To", type: "text", value: inbound.from || "", required: true, max_length: 200 },
       // cc MUST be textarea. Nexus silently rejects a text field with a large
       // max_length and drops the WHOLE modal, so the card renders with no Edit
       // trigger at all. Courtney already paid for this one; do not "simplify".
       { name: "cc", label: "CC (comma-separated)", type: "textarea", value: cc.join(", "), required: false, max_length: 1000 },
+      { name: "subject", label: "Subject", type: "text", value: replySubject(inbound.subject), required: true, max_length: 200 },
       { name: "body", label: "Reply body", type: "textarea", value: htmlToText(opts.draftHtml || opts.draftText, 4000), required: true, max_length: 4000 },
     ],
     callback_url: `${workerBaseUrl}/api/internal/modal-submit`,
@@ -470,9 +490,23 @@ export async function handleExternalReplyModal(env, payload, opts) {
   }
 
   const ccVal = typeof values.cc === "string" ? values.cc.trim() : "";
+  const toVal = typeof values.to === "string" ? values.to.trim() : "";
+  const subjectVal = typeof values.subject === "string" ? values.subject.trim() : "";
+
+  // Overrides are set ONLY when the reviewer actually changed the field. An
+  // untouched reply must PATCH neither toRecipients nor subject, so it keeps
+  // whatever createReply built for the thread. Comparing against the same
+  // values the modal was prefilled with is what makes that safe.
+  const toList = toVal ? parseAddresses(toVal) : [];
+  const toChanged = toList.length > 0 && toList.join(",").toLowerCase() !== String(pending.from || "").toLowerCase();
+  const subjectChanged = Boolean(subjectVal) && subjectVal !== replySubject(pending.subject);
+
   const edited = {
     ...pending,
     cc: ccVal ? parseAddresses(ccVal) : [],
+    to: toList.length ? toList.join(", ") : pending.to,
+    toOverride: toChanged ? toList : undefined,
+    subjectOverride: subjectChanged ? subjectVal : undefined,
     draftHtml: textToHtml(bodyText),
     edited_by: actor,
   };
