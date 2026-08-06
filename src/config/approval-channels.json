@@ -9,11 +9,12 @@
     "jacob:hitl-test":            "jacob-hitl",
     "jacob:breach-scan":          "jacob-hitl",
 
-    "maxwell:vendor-reply":       "maxwell-finance",
-    "maxwell:invoice-fix":        "maxwell-finance",
-    "maxwell:ap-bill":            "maxwell-finance",
-    "maxwell:bank-statement":     "maxwell-finance",
-    "maxwell:draft-invoice":      "maxwell-finance",
+    "maxwell:vendor-reply":       "maxwell-hitl",
+    "maxwell:invoice-fix":        "maxwell-hitl",
+    "maxwell:ap-bill":            "maxwell-hitl",
+    "maxwell:bank-statement":     "maxwell-hitl",
+    "maxwell:draft-invoice":      "maxwell-hitl",
+    "maxwell:external-reply":     "maxwell-hitl",
 
     "courtney:external-reply":    "courtney-hitl",
     "courtney:hello-email":       "courtney-hitl",
@@ -22,10 +23,12 @@
 
     "dexter:drift":               "dexter-hitl",
     "dexter:breach-scan":         "dexter-hitl",
+    "dexter:external-reply":      "dexter-hitl",
 
     "robert:incident":            "robert-hitl",
     "robert:hunt":                "robert-hitl",
     "robert:deep-dive":           "robert-hitl",
+    "robert:external-reply":      "robert-hitl",
 
     "wren:cadence":               "wren-hitl",
 

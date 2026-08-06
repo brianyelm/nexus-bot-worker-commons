@@ -4,92 +4,225 @@
 // Brian 2026-06-05: every email to every bot should surface a HITL draft so no
 // inbox needs manual checking. Bots whose mail pollers auto-reply to internal
 // staff but SILENTLY DROP external mail (Dexter, Robert, Maxwell) use this to
-// turn each external message into a "Approve & Send" card in the bot's HITL
-// channel instead. Internal auto-replies are unchanged.
+// turn each external message into a reviewable card in the bot's HITL channel
+// instead. Internal auto-replies are unchanged.
 //
 // Storage is KV (every bot has a CACHE binding) keyed by the Nexus card id, so
-// there is no per-bot D1 migration. The card shows the full inbound + drafted
-// reply + recipients; Approve & Send / Reject buttons reuse each bot's existing
-// /api/internal/button-click dispatcher. Nothing sends until Approve is clicked.
+// there is no per-bot D1 migration.
+//
+// GRAMMAR (Brian 2026-08-06, aligned to Courtney's emailGate): there is no
+// blind Approve & Send. A card carries Reject plus an "Edit reply and send"
+// modal, and the modal is the ONLY send path, so a human reads the reply before
+// it leaves. Cards staged before that date still carry the old Approve button;
+// the legacy branch below keeps them working until their KV rows expire.
+//
+// Two failure-mode rules this file exists to enforce, both learned the hard way:
+//
+//   1. A failed send must NEVER destroy the card. editNexusMessage replaces the
+//      WHOLE body, so the old failure path turned a full draft card into the
+//      bare string "Send failed: ..." with a live send button still attached.
+//      The rendered card body is now persisted in KV and every failure re-renders
+//      it with a banner appended.
+//   2. A send that reports failure may still have been DELIVERED. Graph answers
+//      a send with 202 and an empty body; parsing that as JSON throws after the
+//      mail is gone (the 2026-08-06 Maxwell incident). Before any send we write
+//      an attempt marker, and a second attempt refuses and tells the reviewer to
+//      check Sent Items instead of quietly sending a duplicate.
 // =============================================================================
 
-import { postToNexus, attachButtons, editNexusMessage } from "./nexus.js";
+import { postToNexus, attachButtons, attachModals, editNexusMessage, settleHitlCard } from "./nexus.js";
 import { buildReport } from "./embedCard.js";
+import { routeApprovalChannel } from "./channelRouter.js";
 
 const TTL_SECONDS = 7 * 24 * 60 * 60;
+const DEFAULT_KIND = "external-reply";
 
-function clamp(v, n) { const s = String(v ?? ""); return s.length <= n ? s : s.slice(0, n - 3) + "..."; }
+/** Clamp a string for card display. */
+function clamp(str, max) {
+  const s = String(str ?? "");
+  return s.length > max ? `${s.slice(0, max)}...` : s;
+}
 
 /**
- * Stage an external inbound email as a HITL reply card.
- *
- * @param {object} env
- * @param {object} opts
- * @param {string} opts.botName            display name (e.g. "Dexter")
- * @param {string} opts.nexusKeyEnvVar     outbound Nexus key env var
- * @param {string} opts.callbackSecretEnvVar
- * @param {string} opts.hitlChannel        slug (e.g. "dexter-hitl")
- * @param {string} opts.workerBaseUrl      absolute base for the button callback_url
- * @param {string} [opts.buttonPrefix="extmail"]   button id prefix (approve/reject)
- * @param {string} [opts.kvPrefix="extreply:"]     KV key prefix for pending payloads
- * @param {object} opts.inbound  { emailId, from, fromName, to, cc, subject, received, preview }
- * @param {string} opts.draftHtml  drafted reply body (HTML)
- * @param {string} opts.draftText  drafted reply as plain text (for the card preview)
- * @returns {Promise<{ success: boolean, messageId?: string, error?: string }>}
+ * Flatten HTML to readable text for a markdown card or a modal textarea.
+ * @param {string} html - Source HTML.
+ * @param {number} [limit=4000] - Maximum characters to keep.
+ * @returns {string} Plain text.
  */
-export async function stageExternalReply(env, opts) {
-  if (!env.CACHE) return { success: false, error: "CACHE (KV) binding missing" };
-  const buttonPrefix = opts.buttonPrefix || "extmail";
-  const kvPrefix = opts.kvPrefix || "extreply:";
-  const inb = opts.inbound || {};
-  const cc = Array.isArray(inb.cc) ? inb.cc : (inb.cc ? [inb.cc] : []);
+export function htmlToText(html, limit = 4000) {
+  const text = String(html || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|tr|h[1-6])>/gi, "\n\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return text.length > limit ? `${text.slice(0, limit)}...` : text;
+}
 
-  const card = buildReport({
-    botName: opts.botName,
+/**
+ * Wrap reviewer-typed plain text back into the HTML a Graph send expects.
+ * Mirrors the per-bot modal handlers so an edited reply renders like a drafted
+ * one instead of arriving as a single run-on paragraph.
+ *
+ * @param {string} text - Plain text from the modal textarea.
+ * @returns {string} HTML body.
+ */
+export function textToHtml(text) {
+  const escaped = String(text || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return escaped
+    .split(/\n{2,}/)
+    .map(para => `<p>${para.replace(/\n/g, "<br>")}</p>`)
+    .join("");
+}
+
+/** Split a reviewer-typed address list on commas, semicolons or whitespace. */
+function parseAddresses(value) {
+  return String(value || "").split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
+}
+
+/**
+ * Render the reviewable card body. Persisted verbatim in KV so a later failure
+ * can rebuild the card instead of overwriting it.
+ *
+ * @param {object} params
+ * @param {string} params.botName - Bot display name.
+ * @param {object} params.inbound - Inbound message summary.
+ * @param {string[]} params.cc - CC list on the draft.
+ * @param {string} params.draftText - Plain-text draft preview.
+ * @returns {string} Markdown card body.
+ */
+function renderCard({ botName, inbound, cc, draftText }) {
+  return buildReport({
+    botName,
     emoji: "📨",
     title: "External Email -- Reply Draft",
-    subtitle: "Awaiting approval -- nothing sent until you Approve & Send",
+    subtitle: "Awaiting review. Nothing sends until you open Edit reply and send.",
     sections: [
       {
         emoji: "📧",
         title: "Inbound",
         lines: [
-          `- **From:** ${clamp(`${inb.fromName ? `${inb.fromName} ` : ""}<${inb.from || "unknown"}>`, 200)}`,
-          `- **Subject:** ${clamp(inb.subject || "(no subject)", 200)}`,
-          `- **Received:** ${clamp(inb.received || "(unknown)", 60)}`,
-          inb.preview ? `- **Preview:** ${clamp(inb.preview, 600)}` : null,
+          `- **From:** ${clamp(`${inbound.fromName ? `${inbound.fromName} ` : ""}<${inbound.from || "unknown"}>`, 200)}`,
+          `- **Subject:** ${clamp(inbound.subject || "(no subject)", 200)}`,
+          `- **Received:** ${clamp(inbound.received || "(unknown)", 60)}`,
+          inbound.preview ? `- **Preview:** ${clamp(inbound.preview, 600)}` : null,
         ].filter(Boolean).join("\n"),
       },
       {
         emoji: "↩️",
         title: "Draft reply",
         lines: [
-          `- **To:** ${clamp(inb.from || "(unknown)", 200)}`,
+          `- **To:** ${clamp(inbound.from || "(unknown)", 200)}`,
           `- **CC:** ${clamp(cc.length ? cc.join(", ") : "(none)", 300)}`,
           "",
-          clamp(opts.draftText || "(empty)", 1500),
+          clamp(draftText || "(empty)", 1500),
         ].join("\n"),
       },
     ],
   });
+}
 
+/**
+ * Fallback card body for a legacy KV row staged before cardBody was persisted.
+ * @param {object} pending - Stored payload.
+ * @returns {string} Markdown card body.
+ */
+function legacyCardBody(pending) {
+  const cc = Array.isArray(pending?.cc) ? pending.cc : [];
+  return buildReport({
+    botName: pending?.botName || "",
+    emoji: "📨",
+    title: "External Email -- Reply Draft",
+    subtitle: "Rebuilt from storage. This card was staged before card bodies were persisted.",
+    sections: [{
+      emoji: "↩️",
+      title: "Draft reply",
+      lines: [
+        `- **To:** ${pending?.to || pending?.from || "(unknown)"}`,
+        `- **CC:** ${cc.length ? cc.join(", ") : "(none)"}`,
+        `- **Subject:** ${pending?.subject || "(no subject)"}`,
+        "",
+        clamp(htmlToText(pending?.draftHtml, 1500), 1500) || "(draft body empty)",
+      ].join("\n"),
+    }],
+  });
+}
+
+/**
+ * Stage an inbound external email as a reviewable HITL card.
+ *
+ * @param {object} env
+ * @param {object} opts
+ * @param {string} opts.bot                        lowercase bot name, routes the channel
+ * @param {string} [opts.kind="external-reply"]    routing kind for routeApprovalChannel
+ * @param {string} [opts.hitlChannel]              DEPRECATED explicit slug override
+ * @param {string} opts.botName                    display name on the card
+ * @param {object} opts.inbound                    { emailId, from, fromName, cc, subject, received, preview }
+ * @param {string} opts.draftHtml                  HTML body that will actually be sent
+ * @param {string} opts.draftText                  plain-text preview for the card
+ * @param {string} opts.workerBaseUrl              absolute base URL for callbacks
+ * @param {string} [opts.buttonPrefix="extmail"]   button/modal id namespace
+ * @param {string} [opts.kvPrefix="extreply:"]     KV key prefix for pending payloads
+ * @param {string} [opts.nexusKeyEnvVar]
+ * @param {string} [opts.callbackSecretEnvVar]
+ * @returns {Promise<{success: boolean, messageId?: string, error?: string}>}
+ */
+export async function stageExternalReply(env, opts) {
+  if (!env.CACHE) return { success: false, error: "CACHE (KV) binding missing" };
+  const buttonPrefix = opts.buttonPrefix || "extmail";
+  const kvPrefix = opts.kvPrefix || "extreply:";
+  const inbound = opts.inbound || {};
+  const cc = Array.isArray(inbound.cc) ? inbound.cc : (inbound.cc ? [inbound.cc] : []);
+
+  // The modal IS the send path, so a card posted without a resolvable callback
+  // base URL would be unactionable. Refuse to post one rather than leave a
+  // reviewer clicking a trigger that submits into a relative URL.
+  const workerBaseUrl = opts.workerBaseUrl || "";
+  if (!workerBaseUrl) {
+    console.error(`[externalReplyGate] no workerBaseUrl for ${opts.bot || opts.botName}, refusing to stage an unactionable card`);
+    return { success: false, error: "workerBaseUrl required" };
+  }
+
+  let channelSlug;
+  if (opts.hitlChannel) {
+    console.warn(`[externalReplyGate] hitlChannel is deprecated, pass bot + kind instead (got "${opts.hitlChannel}")`);
+    channelSlug = opts.hitlChannel;
+  } else {
+    channelSlug = routeApprovalChannel(env, { bot: opts.bot, kind: opts.kind || DEFAULT_KIND });
+  }
+
+  const cardBody = renderCard({ botName: opts.botName, inbound, cc, draftText: opts.draftText });
   const nexusOpts = { nexusKeyEnvVar: opts.nexusKeyEnvVar, callbackSecretEnvVar: opts.callbackSecretEnvVar };
+
   let msg;
   try {
-    msg = await postToNexus(env, opts.hitlChannel, card, { nexusKeyEnvVar: opts.nexusKeyEnvVar });
+    msg = await postToNexus(env, channelSlug, cardBody, { nexusKeyEnvVar: opts.nexusKeyEnvVar });
   } catch (err) {
     return { success: false, error: `postToNexus failed: ${err.message}` };
   }
+  // postToNexus returns null on an intermittent Nexus 5xx rather than throwing.
   const messageId = msg?.id;
   if (!messageId) return { success: false, error: "no message id from Nexus" };
 
   const payload = {
-    emailId: inb.emailId,
-    from: inb.from,
-    to: inb.from,
+    emailId: inbound.emailId,
+    from: inbound.from,
+    to: inbound.from,
     cc,
-    subject: inb.subject,
+    subject: inbound.subject,
     draftHtml: opts.draftHtml || "",
+    cardBody,
+    channelSlug,
+    botName: opts.botName || "",
+    attempts: 0,
     staged_at: new Date().toISOString(),
   };
   try {
@@ -98,29 +231,159 @@ export async function stageExternalReply(env, opts) {
     return { success: false, error: `KV put failed: ${err.message}`, messageId };
   }
 
-  const callbackUrl = `${opts.workerBaseUrl || ""}/api/internal/button-click`;
   await attachButtons(env, messageId, [
-    { button_id: `${buttonPrefix}_approve:${messageId}`, label: "Approve & Send", style: "primary", callback_url: callbackUrl },
-    { button_id: `${buttonPrefix}_reject:${messageId}`,  label: "Reject",         style: "danger",  callback_url: callbackUrl },
+    { button_id: `${buttonPrefix}_reject:${messageId}`, label: "Reject", style: "danger", callback_url: `${workerBaseUrl}/api/internal/button-click` },
   ], nexusOpts).catch(err => console.warn(`[externalReplyGate] attachButtons failed: ${err.message}`));
 
-  return { success: true, messageId };
+  // Only CC and body are editable. This is a THREAD reply built with Graph
+  // createReply, so the recipient and subject are fixed by the thread itself;
+  // offering fields whose edits get silently discarded would be worse than not
+  // offering them. Redirecting a reply elsewhere means Reject plus a fresh mail.
+  await attachModals(env, messageId, [{
+    modal_id: `${buttonPrefix}-edit:${messageId}`,
+    title: "Edit reply and send",
+    fields: [
+      // cc MUST be textarea. Nexus silently rejects a text field with a large
+      // max_length and drops the WHOLE modal, so the card renders with no Edit
+      // trigger at all. Courtney already paid for this one; do not "simplify".
+      { name: "cc", label: "CC (comma-separated)", type: "textarea", value: cc.join(", "), required: false, max_length: 1000 },
+      { name: "body", label: "Reply body", type: "textarea", value: htmlToText(opts.draftHtml || opts.draftText, 4000), required: true, max_length: 4000 },
+    ],
+    callback_url: `${workerBaseUrl}/api/internal/modal-submit`,
+  }], nexusOpts).catch(err => console.warn(`[externalReplyGate] attachModals failed: ${err.message}`));
+
+  return { success: true, messageId, channelSlug };
 }
 
 /**
- * Handle an Approve & Send / Reject click for an external-reply card. Routes by
- * button prefix, loads the KV payload, and on approve invokes the bot-provided
- * sendReply(env, payload) (which performs the actual Graph reply). Idempotent:
- * the KV row is deleted on first action so a double click cannot double-send.
+ * Re-render a card after a failed send WITHOUT destroying it, and re-stage the
+ * KV row so the reviewer can retry. Components are deliberately left live.
+ *
+ * @param {object} env
+ * @param {string} messageId
+ * @param {object} pending - Stored payload (mutated with the new attempt count).
+ * @param {Error} err - The send failure.
+ * @param {string} key - KV key holding the payload.
+ * @param {object} editOpts - Nexus options.
+ * @returns {Promise<void>}
+ */
+async function renderFailure(env, messageId, pending, err, key, editOpts) {
+  const attempt = (pending.attempts || 0) + 1;
+  pending.attempts = attempt;
+  await env.CACHE.put(key, JSON.stringify(pending), { expirationTtl: TTL_SECONDS }).catch(() => {});
+  const banner = [
+    "",
+    `> **Send failed (attempt ${attempt}).** ${clamp(err?.message || "unknown error", 200)}`,
+    "> The draft above is unchanged and the card is still actionable.",
+    "> If this is a repeat failure, check the mailbox Sent Items before retrying: a send can report failure after it has already been delivered.",
+  ].join("\n");
+  await editNexusMessage(env, messageId, `${pending.cardBody || legacyCardBody(pending)}\n${banner}`, editOpts)
+    .catch(e => console.warn(`[externalReplyGate] failure re-render failed: ${e.message}`));
+}
+
+/**
+ * Record that a send is about to be attempted for this email, and report
+ * whether one already was. Guards the "reported failure but actually delivered"
+ * case, which no amount of response parsing can fully rule out.
+ *
+ * @param {object} env
+ * @param {string} guardKey - KV key for the attempt marker.
+ * @param {string} actor - Who is attempting the send.
+ * @returns {Promise<object|null>} The prior attempt marker, or null if this is the first.
+ */
+async function claimSendAttempt(env, guardKey, actor) {
+  const prior = await env.CACHE.get(guardKey, "json").catch(() => null);
+  if (prior) return prior;
+  await env.CACHE
+    .put(guardKey, JSON.stringify({ at: new Date().toISOString(), actor }), { expirationTtl: TTL_SECONDS })
+    .catch(() => {});
+  return null;
+}
+
+/**
+ * Render the "a send was already attempted" stop card, with a single override
+ * button for the case where the reviewer has checked Sent Items and knows the
+ * mail never left.
+ *
+ * @param {object} env
+ * @param {string} messageId
+ * @param {object} pending - Stored payload.
+ * @param {object} prior - The earlier attempt marker.
+ * @param {string} buttonPrefix
+ * @param {string} workerBaseUrl
+ * @param {object} nexusOpts
+ * @returns {Promise<void>}
+ */
+async function renderAlreadyAttempted(env, messageId, pending, prior, buttonPrefix, workerBaseUrl, nexusOpts) {
+  const banner = [
+    "",
+    `> **A send was already attempted at ${prior.at} by ${prior.actor}.** Nothing was sent just now.`,
+    "> Check the mailbox Sent Items. A send can report failure after Graph has already delivered it, so retrying blind risks a duplicate.",
+    "> Use Send anyway only once you have confirmed the reply is NOT in Sent Items.",
+  ].join("\n");
+  await editNexusMessage(env, messageId, `${pending.cardBody || legacyCardBody(pending)}\n${banner}`, nexusOpts)
+    .catch(e => console.warn(`[externalReplyGate] attempt-guard re-render failed: ${e.message}`));
+  if (!workerBaseUrl) return;
+  await attachButtons(env, messageId, [
+    { button_id: `${buttonPrefix}_force:${messageId}`, label: "Send anyway", style: "danger", callback_url: `${workerBaseUrl}/api/internal/button-click` },
+  ], nexusOpts).catch(err => console.warn(`[externalReplyGate] force button attach failed: ${err.message}`));
+}
+
+/**
+ * Perform the send for a claimed card and settle or re-render the card.
+ * Shared by the modal path, the legacy approve path and the force override.
+ *
+ * @param {object} env
+ * @param {object} params - { messageId, key, pending, actor, opts, force }
+ * @returns {Promise<{handled: boolean, action: string}>}
+ */
+async function sendAndSettle(env, { messageId, key, pending, actor, opts, force = false }) {
+  const buttonPrefix = opts.buttonPrefix || "extmail";
+  const kvPrefix = opts.kvPrefix || "extreply:";
+  const nexusOpts = { nexusKeyEnvVar: opts.nexusKeyEnvVar, callbackSecretEnvVar: opts.callbackSecretEnvVar };
+  const guardKey = `${kvPrefix}attempt:${pending.emailId}`;
+
+  if (!force) {
+    const prior = await claimSendAttempt(env, guardKey, actor);
+    if (prior) {
+      // Put the card back so the override button has something to act on.
+      await env.CACHE.put(key, JSON.stringify(pending), { expirationTtl: TTL_SECONDS }).catch(() => {});
+      await renderAlreadyAttempted(env, messageId, pending, prior, buttonPrefix, opts.workerBaseUrl || "", nexusOpts);
+      return { handled: true, action: "already_attempted" };
+    }
+  }
+
+  try {
+    await opts.sendReply(env, pending);
+  } catch (err) {
+    await renderFailure(env, messageId, pending, err, key, nexusOpts);
+    return { handled: true, action: "failed" };
+  }
+
+  const ccLine = Array.isArray(pending.cc) && pending.cc.length ? ` CC: ${pending.cc.join(", ")}` : "";
+  await settleHitlCard(env, messageId, {
+    botName: pending.botName || "",
+    title: "External Reply",
+    status: `Sent to ${pending.to || pending.from || "recipient"}${ccLine}`,
+    actor,
+  }, nexusOpts).catch(e => console.warn(`[externalReplyGate] settle failed: ${e.message}`));
+  return { handled: true, action: "sent" };
+}
+
+/**
+ * Handle a Reject / legacy Approve & Send / Send anyway click on an
+ * external-reply card.
  *
  * @param {object} env
  * @param {object} payload   normalized button-click payload (button_id, message_id, display_name)
  * @param {object} opts
- * @param {string} opts.nexusKeyEnvVar
+ * @param {function} opts.sendReply    (env, pending) => Promise, performs the Graph reply
  * @param {string} [opts.buttonPrefix="extmail"]
  * @param {string} [opts.kvPrefix="extreply:"]
- * @param {(env: object, pending: object) => Promise<void>} opts.sendReply
- * @returns {Promise<{ handled: boolean, action?: string }>}
+ * @param {string} [opts.workerBaseUrl]
+ * @param {string} [opts.nexusKeyEnvVar]
+ * @param {string} [opts.callbackSecretEnvVar]
+ * @returns {Promise<{handled: boolean, action?: string}>}
  */
 export async function handleExternalReplyGate(env, payload, opts) {
   const buttonId = String(payload?.button_id || "");
@@ -128,7 +391,7 @@ export async function handleExternalReplyGate(env, payload, opts) {
   const actor = (typeof payload?.display_name === "string" && payload.display_name.trim()) ? payload.display_name.trim() : "someone";
   const buttonPrefix = opts.buttonPrefix || "extmail";
   const kvPrefix = opts.kvPrefix || "extreply:";
-  const editOpts = { nexusKeyEnvVar: opts.nexusKeyEnvVar };
+  const nexusOpts = { nexusKeyEnvVar: opts.nexusKeyEnvVar, callbackSecretEnvVar: opts.callbackSecretEnvVar };
 
   if (!buttonId.startsWith(`${buttonPrefix}_`)) return { handled: false };
   if (!env.CACHE || !messageId) return { handled: false };
@@ -136,7 +399,7 @@ export async function handleExternalReplyGate(env, payload, opts) {
   const key = `${kvPrefix}${messageId}`;
   const raw = await env.CACHE.get(key);
   if (!raw) {
-    await editNexusMessage(env, messageId, "**This email draft was already actioned.**", editOpts).catch(() => {});
+    await settleHitlCard(env, messageId, { title: "External Reply", status: "Already actioned" }, nexusOpts).catch(() => {});
     return { handled: true, action: "already" };
   }
   // Claim: delete first so a concurrent click loses the race.
@@ -145,27 +408,73 @@ export async function handleExternalReplyGate(env, payload, opts) {
   try { pending = JSON.parse(raw); } catch { pending = null; }
 
   if (buttonId.startsWith(`${buttonPrefix}_reject:`)) {
-    await editNexusMessage(env, messageId, `**Rejected by ${actor}.** Nothing was sent.`, editOpts).catch(() => {});
+    await settleHitlCard(env, messageId, {
+      botName: pending?.botName || "", title: "External Reply", status: "Rejected, nothing sent", actor, rejected: true,
+    }, nexusOpts).catch(() => {});
     return { handled: true, action: "rejected" };
   }
 
-  if (buttonId.startsWith(`${buttonPrefix}_approve:`)) {
-    if (!pending) {
-      await editNexusMessage(env, messageId, "**Draft payload was unreadable; nothing sent.**", editOpts).catch(() => {});
-      return { handled: true, action: "error" };
-    }
-    try {
-      await opts.sendReply(env, pending);
-    } catch (err) {
-      // Re-stage so the reviewer can retry.
-      await env.CACHE.put(key, raw, { expirationTtl: TTL_SECONDS }).catch(() => {});
-      await editNexusMessage(env, messageId, `**Send failed:** ${clamp(err.message, 200)}. Card left for retry.`, editOpts).catch(() => {});
-      return { handled: true, action: "failed" };
-    }
-    const ccLine = Array.isArray(pending.cc) && pending.cc.length ? `  CC: ${pending.cc.join(", ")}` : "";
-    await editNexusMessage(env, messageId, `**Sent by ${actor}.** To: ${pending.to}${ccLine}`, editOpts).catch(() => {});
-    return { handled: true, action: "sent" };
+  const isLegacyApprove = buttonId.startsWith(`${buttonPrefix}_approve:`);
+  const isForce = buttonId.startsWith(`${buttonPrefix}_force:`);
+  if (!isLegacyApprove && !isForce) return { handled: false };
+
+  if (!pending) {
+    await settleHitlCard(env, messageId, { title: "External Reply", status: "Draft payload unreadable, nothing sent", actor, rejected: true }, nexusOpts).catch(() => {});
+    return { handled: true, action: "error" };
+  }
+  if (isLegacyApprove) {
+    // Cards staged before the 2026-08-06 grammar change. Countable so the tail
+    // can be confirmed empty before this branch is deleted.
+    console.log(`[externalReplyGate] legacy_approve_grammar messageId=${messageId} actor=${actor}`);
   }
 
-  return { handled: false };
+  return sendAndSettle(env, { messageId, key, pending, actor, opts, force: isForce });
+}
+
+/**
+ * Handle the "Edit reply and send" modal submission. This is the sole send path
+ * for cards staged from 2026-08-06 onward.
+ *
+ * @param {object} env
+ * @param {object} payload   normalized modal payload (modal_id, message_id, display_name, values)
+ * @param {object} opts      same shape as handleExternalReplyGate
+ * @returns {Promise<{handled: boolean, action?: string}>}
+ */
+export async function handleExternalReplyModal(env, payload, opts) {
+  const modalId = String(payload?.modal_id || payload?.modalId || "");
+  const messageId = String(payload?.message_id || payload?.messageId || "");
+  const actor = (typeof payload?.display_name === "string" && payload.display_name.trim()) ? payload.display_name.trim() : "someone";
+  const values = payload?.values || {};
+  const buttonPrefix = opts.buttonPrefix || "extmail";
+  const kvPrefix = opts.kvPrefix || "extreply:";
+  const nexusOpts = { nexusKeyEnvVar: opts.nexusKeyEnvVar, callbackSecretEnvVar: opts.callbackSecretEnvVar };
+
+  if (!modalId.startsWith(`${buttonPrefix}-edit:`)) return { handled: false };
+  if (!env.CACHE || !messageId) return { handled: false };
+
+  const bodyText = typeof values.body === "string" ? values.body.trim() : "";
+  if (!bodyText) return { handled: true, action: "empty_body" };
+
+  const key = `${kvPrefix}${messageId}`;
+  const raw = await env.CACHE.get(key);
+  if (!raw) {
+    await settleHitlCard(env, messageId, { title: "External Reply", status: "Already actioned" }, nexusOpts).catch(() => {});
+    return { handled: true, action: "already" };
+  }
+  await env.CACHE.delete(key).catch(() => {});
+  let pending;
+  try { pending = JSON.parse(raw); } catch { pending = null; }
+  if (!pending) {
+    await settleHitlCard(env, messageId, { title: "External Reply", status: "Draft payload unreadable, nothing sent", actor, rejected: true }, nexusOpts).catch(() => {});
+    return { handled: true, action: "error" };
+  }
+
+  const ccVal = typeof values.cc === "string" ? values.cc.trim() : "";
+  const edited = {
+    ...pending,
+    cc: ccVal ? parseAddresses(ccVal) : [],
+    draftHtml: textToHtml(bodyText),
+    edited_by: actor,
+  };
+  return sendAndSettle(env, { messageId, key, pending: edited, actor, opts });
 }

@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 import { routeApprovalChannel, getApprovalChannelRegistry } from "../src/lib/channelRouter.js";
 
 test("known bot:kind resolves to registered slug", () => {
-  assert.equal(routeApprovalChannel({}, { bot: "maxwell", kind: "vendor-reply" }), "maxwell-finance");
+  assert.equal(routeApprovalChannel({}, { bot: "maxwell", kind: "vendor-reply" }), "maxwell-hitl");
   assert.equal(routeApprovalChannel({}, { bot: "jacob", kind: "cadence-tick" }), "jacob-hitl");
 });
 
@@ -27,7 +27,7 @@ test("unknown bot:kind falls back to {bot}-hitl", () => {
 });
 
 test("inputs are lowercased before lookup", () => {
-  assert.equal(routeApprovalChannel({}, { bot: "MAXWELL", kind: "Vendor-Reply" }), "maxwell-finance");
+  assert.equal(routeApprovalChannel({}, { bot: "MAXWELL", kind: "Vendor-Reply" }), "maxwell-hitl");
 });
 
 test("missing bot or kind throws", () => {
