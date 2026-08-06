@@ -35,6 +35,19 @@
     "kate:procurement":           "kate-hitl"
   },
 
+  "_deliberate_exceptions": {
+    "_comment": "Approval cards that do NOT live in '<bot>-hitl' on purpose. Listed here so nobody 'fixes' them back. Each site also carries an inline comment.",
+    "jacob cold outreach": "APPROVAL_NEXUS_CHANNEL_ID (jacob-cold-approvals). High-volume campaign stream kept out of jacob-hitl so it never buries a card Brian has to act on. Bounce/NDR notices ride the same channel (Brian 2026-08-04).",
+    "courtney allowlist requests": "<client_slug>-alerts, falling back to courtney-hitl only when the client channel is missing or ungranted. The right approver is the tech on that client, not whoever reads Courtney's queue.",
+    "courtney desk cards": "the-desk-status. Shared ticket traffic the whole team works, not a private approval queue.",
+    "commons email-down pings": "BOT_HOME_CHANNELS in lib/emailBackup.js. Outage alarms with nothing to click; they belong where people already look.",
+    "maxwell reconciliation-daily": "maxwell-finance. Its only buttons are linkButtons that open Xero and mutate nothing."
+  },
+
+  "_open_questions": {
+    "kate": "As of 2026-08-06 'kate-hitl' does not exist in Nexus and every kate-* channel (kate-orders, kate-returns, kate-alerts, kate-cs, kate-qa, kate-phone-qa) is ARCHIVED, so kate-worker stages order/return cards into archived channels and this route resolves to a channel that was never created. Needs a decision from Brian: revive the split channels, create kate-hitl, or leave Kate dormant. Do not silently point this at a live channel to make the lookup succeed."
+  },
+
   "severity_overrides": {
     "_comment": "When a route also has a severity-aware destination (e.g. CRITICAL incidents go to a louder channel), list it here keyed by 'bot:kind:SEVERITY'.",
     "robert:incident:CRITICAL":   "soc-notifications"

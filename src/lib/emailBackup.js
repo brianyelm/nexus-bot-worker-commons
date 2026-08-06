@@ -24,6 +24,11 @@ import { postToNexus } from "./nexus.js";
  * channel (where the @channel email-down ping lands) and the env var holding
  * its Nexus API key (passed to postToNexus). Keep this in lockstep with the
  * per-worker NEXUS keys and the voice-bridge persona routing.
+ *
+ * Deliberate exception to the "everything actionable lands in <bot>-hitl" rule:
+ * these are outage alarms, not approval cards. Nobody clicks anything and the
+ * point is that the noisy channel people already watch lights up. Do not route
+ * them through routeApprovalChannel.
  */
 export const BOT_HOME_CHANNELS = {
   jacob:    { slug: "jacob-sales",     keyEnvVar: "JACOB_NEXUS_KEY" },
