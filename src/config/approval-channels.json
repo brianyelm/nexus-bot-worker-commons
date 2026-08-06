@@ -32,7 +32,9 @@
 
     "wren:cadence":               "wren-hitl",
 
-    "kate:procurement":           "kate-hitl"
+    "kate:procurement":           "kate-hitl",
+    "kate:order":                 "kate-hitl",
+    "kate:return":                "kate-hitl"
   },
 
   "_deliberate_exceptions": {
@@ -44,8 +46,8 @@
     "maxwell reconciliation-daily": "maxwell-finance. Its only buttons are linkButtons that open Xero and mutate nothing."
   },
 
-  "_open_questions": {
-    "kate": "As of 2026-08-06 'kate-hitl' does not exist in Nexus and every kate-* channel (kate-orders, kate-returns, kate-alerts, kate-cs, kate-qa, kate-phone-qa) is ARCHIVED, so kate-worker stages order/return cards into archived channels and this route resolves to a channel that was never created. Needs a decision from Brian: revive the split channels, create kate-hitl, or leave Kate dormant. Do not silently point this at a live channel to make the lookup succeed."
+  "_resolved": {
+    "kate": "RESOLVED 2026-08-06. Every kate-* channel had been soft-deleted (kate-cs, kate-orders, kate-returns on 06-30; kate-qa, kate-phone-qa on 06-20) and kate-hitl had never been created, so kate-worker staged order and return cards into dead channels. nexus-app migration 126 revived all six and created kate-hitl. Order and return approvals now route to kate-hitl like every other bot; kate-orders and kate-returns stay alive for their working traffic. kate-alerts is revived but nothing posts to it: migration 061 folded Kate's alerts into the shared #alerts channel and that grant still stands."
   },
 
   "severity_overrides": {
