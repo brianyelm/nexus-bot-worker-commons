@@ -32,7 +32,8 @@
     "./testing": "./testing/index.js",
     "./knowledge": "./src/knowledge/index.js",
     "./personas/luna": "./src/personas/luna.js",
-    "./lib/brand": "./src/lib/brand.js"
+    "./lib/brand": "./src/lib/brand.js",
+    "./lib/eol": "./src/lib/eol.js"
   },
   "files": [
     "src/",
