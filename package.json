@@ -26,6 +26,7 @@
     "./lib/aiDisclosure": "./src/lib/aiDisclosure.js",
     "./lib/appLinks": "./src/lib/appLinks.js",
     "./lib/mimeEmail": "./src/lib/mimeEmail.js",
+    "./lib/graphJson": "./src/lib/graphJson.js",
     "./persona-blocks": "./src/persona-blocks/index.js",
     "./contracts": "./contracts/index.js",
     "./testing": "./testing/index.js",
@@ -43,7 +44,7 @@
     "README.md"
   ],
   "scripts": {
-    "test": "node scripts/check-dashes.mjs src/persona-blocks && node scripts/check-empty-catch.mjs --strict src && node --import ./testing/register-md.mjs --test \"test/**/*.test.js\"",
+    "test": "node scripts/check-dashes.mjs src/persona-blocks && node scripts/check-empty-catch.mjs --strict src && node scripts/check-graph-send-parse.mjs src && node --import ./testing/register-md.mjs --test \"test/**/*.test.js\"",
     "check:empty-catch": "node scripts/check-empty-catch.mjs src"
   },
   "engines": {

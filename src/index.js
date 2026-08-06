@@ -43,6 +43,7 @@ export { buildContactRecall } from "./lib/memoryRecall.js";
 export { senderTrust } from "./lib/mailTrust.js";
 export { isAutomaticReply } from "./lib/mailSafety.js";
 export { stageExternalReply, handleExternalReplyGate } from "./lib/externalReplyGate.js";
+export { parseGraphResponse } from "./lib/graphJson.js";
 export { looksLikeIncomingPayment } from "./lib/incomingPayment.js";
 export { memoryHmacHex, buildMemoryAuthHeaders } from "./lib/memoryAuth.js";
 export { postToNexus, uploadBotAttachment, attachImagesFromUrls, attachButtons, attachSelectMenus, disableMessageButtons, settleMessageComponents, settleHitlCard, attachModals, editNexusMessage, fetchChannelMessages, fetchThreadMessages, sendNexusHeartbeat, sendTyping, pingBotPresence } from "./lib/nexus.js";
