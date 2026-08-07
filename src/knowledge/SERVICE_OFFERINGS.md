@@ -1,133 +1,123 @@
-# Black Raven IT: Service Offerings
+# Black Raven: Service Offerings
 
-Canonical list of what Black Raven IT sells. Use this when drafting partner-facing
+Canonical list of what Black Raven sells. Use this when drafting partner facing
 material (newsletter, partner intros, service spotlights). The partner newsletter's
 monthly "service spotlight" rotates through these sections.
 
+We are a technology and agentic AI company, NOT an IT provider, an MSP, or a managed IT
+services company. Never describe us with those words. Say "technology" where you would
+once have said "IT". Never name the vendors or suppliers behind any capability below:
+describe what it does in our own terms.
+
 ## Who We Serve
 
-- Company size: 20 to 200 employees
-- Geography: Arizona (primary), Illinois, Florida, and the rest of the US remotely
-- Decision makers: owners, CEOs, COOs, IT directors, practice managers
-- Typical client: growing firm that has outgrown break/fix IT or a single internal
-  generalist
+- Company size: roughly 20 to 2000 employees, mid market
+- Geography: Illinois (primary), Arizona, Florida, and the rest of the US remotely
+- Decision makers: owners, CEOs, COOs, technology directors, practice managers
+- Typical client: real operational complexity, too lean to throw headcount at it
 
 ## Service Pillars
 
-### 1. Managed IT (MSP)
+### 1. Unified Commercial Platform
 
-The core offering. Flat-fee per-endpoint monthly contract covers:
+Raven CRM. The whole revenue cycle in one record, with AI email, SMS and voice inside
+it rather than bolted alongside it.
 
-- 24/7 remote monitoring and alerting on servers, endpoints, network gear
-- Patch management (OS and third-party apps)
-- Helpdesk for employees (email, phone, portal)
-- Endpoint protection and EDR
-- Network health, switch and firewall management
-- Quarterly business reviews with the client's leadership
-- Vendor management (ISP, printer vendor, line-of-business software)
+- Lead through quote through contract through invoice, on one record
+- AI drafted outreach and follow through, owned by an agent rather than a reminder
+- Voice and SMS in the same timeline as the email
+- Sold per seat monthly plus a one time build
 
-Fit signals: more than 15 employees, no dedicated internal IT, currently paying
-break/fix or frustrated with a cheaper MSP.
+Fit signals: revenue cycle spread across three or four disconnected tools, someone
+manually copying between them, deals dying in the gaps.
 
-### 2. Managed Security
+### 2. The AI Operations Team
 
-Layered on top of MSP or standalone for clients who already have IT coverage:
+Named agents that own a back office function end to end, not chatbots that answer
+questions about it.
 
-- SIEM and log management
-- Managed detection and response (MDR)
-- Security awareness training with phishing simulation
-- Dark web monitoring (DeHashed-backed)
-- Vulnerability scanning (internal and external)
-- Incident response on retainer
+- Support triage and ticket ownership
+- Client onboarding
+- Licensing reconciliation
+- Finance reconciliation
+- Meeting follow through and action capture
+- Thirteen run in production against our own operations
 
-Fit signals: compliance pressure (HIPAA, PCI, SOC 2), cyber insurance renewal,
-recent phishing or breach scare, board asking about risk.
+Fit signals: back office workload growing faster than headcount, a function that runs on
+one person's memory, work that eats hours and needs little judgment.
 
-### 3. Compliance and Audit Support
+### 3. Autonomous Security Operations
 
-We are not a compliance firm, but we own the IT-side controls and evidence for:
+A security operations centre without the seat count.
 
-- HIPAA (we sign BAAs)
-- PCI DSS (Level 3 and 4 merchants)
-- SOC 2 Type I and II (control mapping and evidence collection)
-- CMMC Level 1 and Level 2 advisory (for DoD supply chain)
-- Cyber insurance questionnaire answers, annually
+- Every alert worked to a verdict, around the clock
+- Incidents correlated rather than delivered as a list
+- Escalation to a person only when a person is genuinely needed
+- One hundred percent of agent actions audited
+- Endpoint containment is armed and audited, and will NOT fire without signed client
+  authorization
 
-Fit signals: anyone with a compliance audit coming up, anyone losing a deal
-because they can't answer a questionnaire.
+Never claim we have autonomously contained a live threat. The capability is live and has
+not been exercised, because no client has signed for it yet.
 
-### 4. Virtual CIO (vCIO)
+Fit signals: alerts nobody works overnight, compliance pressure, cyber insurance
+renewal, a recent phishing or breach scare, the board asking about risk.
 
-Fractional IT leadership for clients too small for a full-time CIO but too complex
-for pure MSP. Monthly or quarterly engagement:
+### 4. Legacy Platform Modernization
 
-- IT strategy and 3-year roadmap
-- Budget planning and capex forecasting
-- Vendor selection and contract negotiation
-- M&A IT due diligence
-- Executive-level reporting
+Assessment first, findings before quotes, staged replacement.
 
-Fit signals: growing from 50 to 150 employees, post-acquisition integration, IT
-leadership gap after a departure.
+- Assess what the system actually does, including the parts nobody documented
+- Findings and options before anyone is asked to sign anything
+- Staged cutover with the old system running until the new one earns the switch
+- Data migration with reconciliation, not a hopeful export
 
-### 5. Cloud and Microsoft 365
+Fit signals: a core system everyone is afraid to touch, a vendor going end of life, an
+acquisition that left two of everything.
 
-We run on M365 ourselves and are deep in the stack:
+### 5. Customer Experience Portals
 
-- M365 tenant setup, migration, and governance
-- Intune device management and conditional access
-- SharePoint and Teams architecture
-- Exchange Online and mailbox management
-- Entra ID (Azure AD) identity and SSO
-- Cross-tenant migrations (M&A)
-- License optimization reviews
+Intake, ordering and self service with an AI front end.
 
-Fit signals: Google Workspace to M365 migration, multiple disconnected tenants
-post-acquisition, license spend seems too high.
+- Customer facing intake that replaces the phone call and the emailed form
+- Ordering and status without a human in the loop for routine cases
+- Branded to the client, not to us
 
-### 6. Backup and Disaster Recovery
+Fit signals: customers calling for status, staff rekeying what a customer already typed,
+an intake process that lives in a shared mailbox.
 
-- Image-level backup for servers (Veeam, Datto)
-- Cloud-to-cloud backup for M365 (mailboxes, SharePoint, OneDrive, Teams)
-- Immutable offsite copies
-- Documented recovery runbooks with RTO/RPO targets
-- Annual DR tabletop exercises
+### 6. Technology Foundation and Licensing Optimization
 
-Fit signals: ransomware near-miss, compliance requirement for backup testing,
-no current offsite backup, M365-only client with no third-party backup.
+The managed estate underneath everything else, plus right sizing the stack.
 
-### 7. Custom AI and Automation (Morphora-adjacent)
+- Monitoring, patching and support for the estate
+- Identity, access and device management
+- Cloud productivity platform administration and governance
+- Backup and recovery with documented recovery targets, tested rather than assumed
+- Compliance evidence and control mapping, and the annual insurance questionnaire
+- Licensing reviewed and right sized rather than renewed as found
 
-Where Black Raven IT and Morphora.ai overlap:
-
-- Internal AI assistant deployments (Claude, GPT, self-hosted)
-- Document workflow automation
-- CRM and ERP integrations built on Cloudflare Workers
-- Custom Discord and Slack bots for internal ops
-- Tenant-isolated AI RAG over client document corpora
-
-Fit signals: client asks "how do we use AI," existing mid-market firm drowning in
-manual process, leadership wants a productivity bet that isn't another SaaS
-subscription.
+Fit signals: software spend that only ever grows, a compliance audit coming up, a deal
+lost to a questionnaire nobody could answer, no tested recovery path.
 
 ## How We Price (for partner conversations, high level only)
 
-- MSP: per-endpoint monthly, tiered by seat count
-- Security: per-user monthly add-on or standalone
-- vCIO: monthly retainer or quarterly project
+- Raven CRM: per seat monthly plus a one time build
+- Agent and automation work: scoped build plus monthly ownership
+- Security operations: per user monthly
+- Foundation and licensing: monthly, scaled to the estate
 - Projects: fixed scope, fixed price
-- Onboarding: one-time fee, typically covered by the first three months of MRR
+- Onboarding: one time fee, typically covered by the first three months of recurring
 
-Never quote specific numbers in a newsletter or partner email. Pricing
-conversations go to a discovery call.
+Never quote specific numbers in a newsletter or partner email. Pricing conversations go
+to a discovery call.
 
 ## What We Don't Do
 
-- Residential / home user support
-- One-person shops (below roughly 10 employees)
-- Pure staff augmentation (we're not a body shop)
-- Custom software development outside our AI/automation scope (we partner with dev
-  shops for that)
+- Residential and home user support
+- One person shops, below roughly 10 employees
+- Pure staff augmentation, we are not a body shop
+- Custom software development outside our AI and automation scope
 
-This list is useful context for the "refer a client" CTA in the newsletter:
-partners should not send us sub-10-employee consumer-grade work.
+This list is useful context for the "refer a client" CTA in the newsletter: partners
+should not send us sub 10 employee consumer grade work.
