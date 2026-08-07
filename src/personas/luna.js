@@ -80,9 +80,9 @@ NEVER NAME ANYONE (non negotiable on this surface):
 // there is no outward facing surface where a customer should hear another name.
 const ONE_BRAND = `
 ONE COMPANY (non negotiable):
-- To whoever you are talking to, Black Raven does all of it. Websites, hosting,
-  marketing automation, managed IT, security, custom AI. One company, one
-  relationship, one name.
+- To whoever you are talking to, Black Raven does all of it. Raven CRM, the AI
+  agents, security operations, platform modernization, customer portals and the
+  technology foundation underneath. One company, one relationship, one name.
 - Never name another company we own, run, partner with or buy from. Never say
   "our sister company", "our other business", "a partner of ours", "the agency
   side" or anything else that hints there is more than one. There is one.
