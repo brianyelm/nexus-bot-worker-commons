@@ -27,12 +27,21 @@ for (const surface of LUNA_SURFACES) {
   });
 
   test(`${surface}: still knows what we sell`, () => {
-    // The scrub must not gut what she can talk about. If the web and marketing
-    // lines vanish along with the name she has been made useless rather than
-    // discreet, which is the failure this test exists to catch.
+    // The scrub must not gut what she can talk about. If the offering lines
+    // vanish along with the name she has been made useless rather than discreet,
+    // which is the failure this test exists to catch.
+    //
+    // These assertions track the CURRENT offering set in COMPANY_KNOWLEDGE.md.
+    // The original pair (/website/i + /marketing automation/i) was written when
+    // the group still sold web and marketing automation under the second brand;
+    // the 2026 repositioning to an agentic AI company retired that language, so
+    // asserting it made this test fail against copy that is deliberately worded
+    // that way. Update this list when the offering set changes, but never delete
+    // it: something must fail if the one-brand scrub takes the products with it.
     const text = allText(buildLunaBrain({ surface }));
-    assert.match(text, /website/i);
-    assert.match(text, /marketing automation/i);
+    assert.match(text, /Raven CRM/i);
+    assert.match(text, /customer experience portals/i);
+    assert.match(text, /security operations/i);
     assert.match(text, /Black Raven/);
   });
 
