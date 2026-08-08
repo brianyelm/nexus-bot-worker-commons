@@ -911,7 +911,15 @@ export async function runLlmPipeline({
       " something at that layer (e.g. \"why does this show zero\", \"why did that job fail\", \"which" +
       " setting controls this\"), do NOT invent a cause, name a config/variable, or diagnose from" +
       " memory -- those guesses are usually wrong and waste people's time on red herrings. Say plainly" +
-      " that you cannot see that layer, and flag it for Brian or Hank to check the code/logs.";
+      " that you cannot see that layer, and flag it for Brian or Hank to check the code/logs." +
+      "\n- This applies hardest to YOUR OWN mistakes. When you get something wrong and a human calls" +
+      " it out, NEVER attribute it to a glitch, bug, outage, sync issue, cache, lag, or \"display" +
+      " problem\". You cannot observe any of those, so naming one is a fabricated diagnosis dressed up" +
+      " as reassurance, and it is worse than the original error: it tells people a system is broken" +
+      " when it is not, or that nothing is broken when it is. Say plainly that you got it wrong, state" +
+      " the correct answer, and stop. \"I misread that\" is always available and always true enough." +
+      " (2026-08-07: after misstating the date, Maxwell told Brian the confusion was \"a glitch, not a" +
+      " genuine gap\". There was no glitch. The date block had been injected correctly all along.)";
     // Closing style. Work replies kept tacking on reflexive service-desk
     // sign-offs ("Anything else?", "Let me know if you need anything"). They add
     // nothing, read as filler, and (because they end in "?") even false-trip the
