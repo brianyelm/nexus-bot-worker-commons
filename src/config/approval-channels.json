@@ -1,6 +1,8 @@
 {
   "_comment": "Approval-channel routing registry, consumed by routeApprovalChannel() in src/lib/channelRouter.js. Keys are 'bot:kind' (lowercase). Each entry resolves to a slug, optionally overridden by severity or clientId. Default when no entry matches: '<bot>-hitl'.",
 
+  "_standing_rule": "Brian, 2026-08-08: a '<bot>-hitl' channel holds ONLY cards that ask a human to approve something, plus the in-context outcome of one of those cards. Everything else (digests, reports, advisories, failure alerts, buttonless records, nags whose only controls are linkButtons) goes to the bot's home channel, listed in BOT_HOME_CHANNELS in src/lib/emailBackup.js. Test: if there is nothing to click that changes what the bot does, it is not a hitl card.",
+
   "default": "{bot}-hitl",
 
   "routes": {
@@ -47,7 +49,7 @@
   },
 
   "_resolved": {
-    "kate": "RESOLVED 2026-08-06. Every kate-* channel had been soft-deleted (kate-cs, kate-orders, kate-returns on 06-30; kate-qa, kate-phone-qa on 06-20) and kate-hitl had never been created, so kate-worker staged order and return cards into dead channels. nexus-app migration 126 revived all six and created kate-hitl. Order and return approvals now route to kate-hitl like every other bot; kate-orders and kate-returns stay alive for their working traffic. kate-alerts is revived but nothing posts to it: migration 061 folded Kate's alerts into the shared #alerts channel and that grant still stands."
+    "kate": "RESOLVED 2026-08-06. Every kate-* channel had been soft-deleted (kate-cs, kate-orders, kate-returns on 06-30; kate-qa, kate-phone-qa on 06-20) and kate-hitl had never been created, so kate-worker staged order and return cards into dead channels. nexus-app migration 126 revived all six and created kate-hitl. Order and return approvals now route to kate-hitl like every other bot; kate-orders and kate-returns stay alive for their working traffic. kate-alerts is revived AND live again as of 2026-08-08: migration 061 had folded Kate's alerts into the shared #alerts channel, but #alerts is itself archived and soft deleted, so the talonsit morning digest, followup nag and voice escalation had been posting into nothing. All three now target kate-alerts."
   },
 
   "severity_overrides": {
