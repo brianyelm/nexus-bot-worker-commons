@@ -33,26 +33,54 @@ A single directed map in commons, next to `FLEET_CAPABILITY_MAP.md`, is the
 only source of truth for legal relay edges. Not a mesh, not derived from
 grants, not inferable by a model at runtime.
 
+Per Brian (2026-08-09) the graph is near-complete rather than curated, with two
+bots write-only and one bot out entirely:
+
+    const OPEN = ["wren", "courtney", "dexter", "jacob", "kate", "moxie"];
+
     FLEET_RELAY_ROUTES = {
-      wren:     ["jacob", "courtney"],
-      robert:   ["dexter", "courtney"],
-      courtney: ["dexter", "jacob"],
-      dexter:   ["courtney"],
-      jacob:    ["courtney", "kate"],
-      kate:     ["jacob"],
-      maxwell:  ["courtney"],
-      moxie:    [],
-      flynn:    [],
+      // Send to anyone but each other. Nothing may relay INTO either of them.
+      maxwell:  [...OPEN, "robert"].filter(b => b !== "robert"),  // 6
+      robert:   [...OPEN, "maxwell"].filter(b => b !== "maxwell"), // 6
+      // Everyone else: anyone except self, maxwell, robert.
+      wren:     OPEN.filter(b => b !== "wren"),     // 5
+      courtney: OPEN.filter(b => b !== "courtney"), // 5
+      dexter:   OPEN.filter(b => b !== "dexter"),   // 5
+      jacob:    OPEN.filter(b => b !== "jacob"),    // 5
+      kate:     OPEN.filter(b => b !== "kate"),     // 5
+      moxie:    OPEN.filter(b => b !== "moxie"),    // 5
+      flynn:    [],                                  // out of the fleet relay
     }
 
-**Maxwell and Robert never appear on the right-hand side.** They can ORIGINATE
-a relay; nothing can relay INTO them. Maxwell is the only bot with Xero write.
-Robert holds S1 isolate/remediate and Stellar Cyber case close. Per Brian
-(2026-08-09): if the gate on financial data is not airtight, do not allow the
-conversation at all. Same reasoning extends to Robert's security writes.
+42 directed edges. Flynn is excluded on both sides: he is a mentor persona in
+#flynn-lab, not fleet staff.
+
+**Maxwell and Robert never appear on the right-hand side, including each
+other's.** They can ORIGINATE a relay; nothing can relay INTO them. Maxwell is
+the only bot with Xero write. Robert holds S1 isolate/remediate and Stellar
+Cyber case close. Per Brian (2026-08-09): if the gate on financial data is not
+airtight, do not allow the conversation at all. Same reasoning extends to
+Robert's security writes. Excluding the maxwell<->robert pair also removes the
+only possible two-node relay loop.
 
 Anything not on this map is refused in code with a message that names the
 human path: "I cannot hand this to Maxwell. Ask him directly in #maxwell-finance."
+
+### Gate 1b -- #watercooler is not a relay surface
+
+The `watercooler` channel is personal and social. It has its own ambient
+pipeline (`commons/src/lib/watercooler.js`, per-bot `jobs/watercooler*.js`) and
+its own provenance handling (it is in the UI's `PROVENANCE_HIDDEN_CHANNELS`).
+Per Brian (2026-08-09) fleet relay must stay out of it, in both directions:
+
+1. `watercooler` is never a legal relay TARGET. Relays land in the target bot's
+   home channel, never there.
+2. A turn whose `ctx.channel_slug` is `watercooler` may not ORIGINATE a relay.
+   The relay tool is not offered in that channel and refuses if called anyway.
+   Social chatter must not be able to dispatch work.
+
+Without rule 2, forty-two edges plus nine ambient watercooler crons is a fleet
+that assigns itself work while making small talk.
 
 ### Gate 2 -- authority downgrade (what a bot-originated request may trigger)
 
@@ -67,7 +95,15 @@ with the refusal telling the requester to have a human ask.
       courtney: ["desk_create_ticket", ...kb + desk reads],
       dexter:   [...reads only],
       kate:     [...reads only],
+      wren:     [...reads only],  // calendar/todo writes stay human-only
+      moxie:    [...reads only],
+      // maxwell, robert: no policy entry. They are unreachable by Gate 1.
     }
+
+With the near-complete graph every open bot is now a RECEIVER, so this policy
+must exist for all six of them, not just the four that had inbound edges under
+the curated map. Writing these six allowlists is the real work of this project;
+the ~42 `bot_channel_permissions` rows are trivial by comparison.
 
 Note what this buys beyond Gate 1: even on a legal edge, Wren cannot talk
 Jacob into sending cold outbound or editing an agreement. She can add and
@@ -116,8 +152,14 @@ tool defs plus handlers. Every bot wires one line in its registry. The two
 hand-rolled relays are deleted and re-pointed at the shared primitive so the
 routing, the gates, and the loop guard exist in exactly one place.
 
-Per-bot Nexus work: a `bot_channel_permissions` grant per legal edge, about 14
-rows for the map above versus 72 for a full mesh.
+**One parameterized tool, not one tool per target.** A single
+`message_bot({ target, message })` whose `target` enum is generated from
+`FLEET_RELAY_ROUTES[selfBot]`. Six named relay tools per bot would add 42 tool
+definitions across the fleet, bloat every system prompt, and drift.
+`notify_brian` stays separate: it is a human-notification path, not a relay.
+
+Per-bot Nexus work: a `bot_channel_permissions` grant per legal edge, 42 rows
+versus 72 for a full mesh.
 
 ## Open question for Brian
 
