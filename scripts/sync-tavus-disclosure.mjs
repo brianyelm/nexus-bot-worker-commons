@@ -71,6 +71,28 @@ const CODE_OWNED = [
     // LIVE conversation roster; that slot uses the website Luna p1748a07319d,
     // same replica and voice, disclosure already "always".
     why: "pre-render only, disclosure would be baked into every clip" },
+  { id: "p2ba033a834c", label: "Luna demo Q&A (luna-demo live conversations)", skip: true,
+    // Skipped on purpose, and this one is a JUDGEMENT rather than a technical
+    // exemption, so it needs the reasoning written down.
+    //
+    // She is the same replica, voice and brain as the website Luna, cloned off
+    // her on 2026-08-09 for one difference: no platform banner. Tavus renders
+    // visual_disclosure INTO the video for the entire call, which is right for a
+    // stranger on blackravenit.com and wrong the moment a presenter hands over
+    // to questions, where it reads as a warning label across the face of the
+    // speaker the room has just watched for ten minutes.
+    //
+    // Disclosure is not dropped here, it is relocated to two places that hold:
+    // the audience stage carries a permanent "AI generated video" badge
+    // (luna-demo/src/pages/audience.js), and her Q&A greeting says it out loud
+    // in her own voice on the first interaction (luna-demo/src/tavus.js
+    // QA_GREETING). Both are in code and both are load bearing. If either is
+    // removed, this persona must come back into the sweep the same day.
+    //
+    // This exemption holds ONLY while she is attended: a presenter in the room,
+    // a defined audience, a call that someone opened deliberately. Point her at
+    // an unattended public surface and set disclosure_type back to "always".
+    why: "attended stage surface, disclosure carried by the stage badge and her spoken greeting" },
   // No longer skipped as of 2026-08-09. It was exempted as a voice test rig
   // that never faced an audience, but fleet-video lists it as the `jacob-tavus`
   // chip in FLEET_TAVUS_PERSONAS, so it holds live conversations on a surface
