@@ -65,9 +65,19 @@ const CODE_OWNED = [
     // Skipped on purpose. This persona exists to PRE RENDER clips. Switching on
     // a spoken disclosure would prepend it to every recorded clip and bill the
     // minutes for it. The demo stage carries the visible badge instead.
+    //
+    // This exemption only holds while the persona stays render-only. It must
+    // therefore never appear in fleet-video's FLEET_TAVUS_PERSONAS, which is a
+    // LIVE conversation roster; that slot uses the website Luna p1748a07319d,
+    // same replica and voice, disclosure already "always".
     why: "pre-render only, disclosure would be baked into every clip" },
-  { id: "p4760a22e886", label: "Jacob ElevenLabs voice test", skip: true,
-    why: "voice test rig, never faces an audience" },
+  // No longer skipped as of 2026-08-09. It was exempted as a voice test rig
+  // that never faced an audience, but fleet-video lists it as the `jacob-tavus`
+  // chip in FLEET_TAVUS_PERSONAS, so it holds live conversations on a surface
+  // Brian demos to prospects. The exemption described a premise that is no
+  // longer true. It renders no clips, so unlike the luna-demo recorder there is
+  // nothing a spoken disclosure would be baked into.
+  { id: "p4760a22e886", label: "Jacob ElevenLabs voice test (fleet-video jacob-tavus chip)" },
 ];
 
 /**
@@ -115,6 +125,11 @@ const HAND_MAINTAINED = [
 async function tavus(path, init = {}) {
   const res = await fetch(`${API}${path}`, { ...init, headers: H });
   const text = await res.text();
+  // Tavus answers a PATCH that changes nothing with 304 and an empty body. That
+  // is the success case on a re-run, not a failure, and treating it as one made
+  // this script single use: the first persona already in the desired state
+  // aborted the whole sweep before the ones behind it were touched.
+  if (res.status === 304) return {};
   if (!res.ok) throw new Error(`Tavus ${res.status} on ${path}: ${text.slice(0, 300)}`);
   return text ? JSON.parse(text) : {};
 }
@@ -161,7 +176,12 @@ async function sync(persona) {
     return;
   }
 
-  await tavus(`/personas/${persona.id}`, { method: "PATCH", body: JSON.stringify(ops) });
+  // `?target=live` is load bearing. Without it Tavus applies the patch to the
+  // persona's DRAFT, returns 200, and the live persona keeps its old settings.
+  // The re-read below caught exactly that on 2026-08-09: PATCH succeeded and
+  // disclosure_type was still "auto". GET reads live by default, so only the
+  // write needs the parameter.
+  await tavus(`/personas/${persona.id}?target=live`, { method: "PATCH", body: JSON.stringify(ops) });
 
   const after = await tavus(`/personas/${persona.id}`);
   console.log(`  now: disclosure=${after.disclosure_type} emotion=${after.layers?.perception?.emotion_recognition}`);
