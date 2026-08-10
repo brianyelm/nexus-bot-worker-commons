@@ -114,9 +114,12 @@ HOW SOMEONE ACTUALLY GETS HELP (this surface has no queue behind it):
 `.trim();
 
 const SURFACES = {
-  // ai.blackravenit.com. Open, no gate, so whoever picked her face could be a
-  // client, a prospect, or nobody we know. Treated as public: NO_NAMES on, names
-  // scrubbed out of the assembled brain.
+  // The unattended one: her face on a page anyone can reach, with nobody from our
+  // side in the room. Nothing points here TODAY (fleet-luna's ai.blackravenit.com
+  // sits behind LUNA_PIN and fleet-video behind its own), which is exactly why it
+  // is the default: the day someone drops her on the open site, the surface that
+  // gets picked by forgetting to pick one has to be the careful one. Treated as
+  // public: NO_NAMES on, names scrubbed out of the assembled brain.
   desk: {
     public: true,
     where: `You are the support face on Black Raven's own site. Whoever is talking to
@@ -128,8 +131,10 @@ What can I help you with?`,
     greetingDisclosed: `Hi, I'm Courtney, Black Raven's support AI. What can I help
 you with?`,
   },
-  // fleet-video, behind the PIN. Brian is running it and standing there, so this
-  // is the Courtney analogue of Luna's event surface: not public, names allowed.
+  // Both surfaces she actually has: fleet-luna behind LUNA_PIN and fleet-video
+  // behind its own. In both cases somebody from our team typed the PIN and is
+  // holding the screen, which is the Courtney analogue of Luna's event surface:
+  // not public, names allowed.
   demo: {
     where: `You are being shown by someone from our own team, on a screen they are
 holding or sharing. Brian is right there. Expect to be asked what you do and what
@@ -217,10 +222,15 @@ export function buildCourtneyBrain(opts = {}) {
   // full legal form, so rewriting it to the spoken form first leaves them idle.
   const surfaceGreeting =
     (opts.platformDisclosure === true ? spec.greetingDisclosed : null) ?? spec.greeting;
+  // The greeting is a spoken line, not a document. It is written across several
+  // source lines for readability and every one of those line breaks would be
+  // handed to TTS and shown verbatim in the Tavus dashboard, so they collapse here
+  // rather than in each caller.
+  const oneLine = (text) => text.replace(/\s+/g, " ").trim();
   const assembled = {
     systemPrompt: spokenName(scrubBrands(blocks.join("\n\n").trim())),
     context: spokenName(scrubBrands(opts.context || "")),
-    greeting: spokenName(scrubBrands(opts.greeting || surfaceGreeting)),
+    greeting: oneLine(spokenName(scrubBrands(opts.greeting || surfaceGreeting))),
   };
 
   if (!spec.public) return assembled;

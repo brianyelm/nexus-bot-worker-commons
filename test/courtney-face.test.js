@@ -7,8 +7,9 @@
 //    world knowledge. She shipped without this and told Brian about the Marvel
 //    superhero when he asked about a client called Hawkeye. Nothing threw and
 //    nothing logged; she just said it, out loud, in a voice people trust.
-// 3. Her public surface must not leak a real name or a second company. She
-//    reaches the open internet on ai.blackravenit.com with no gate.
+// 3. Her public surface must not leak a real name or a second company. Nothing
+//    points at that surface today, both live ones are PIN gated, which is
+//    precisely why it is the default a forgetful caller lands on.
 //
 // None of these produce an error when they break. They produce a sentence.
 

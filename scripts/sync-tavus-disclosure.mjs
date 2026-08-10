@@ -14,10 +14,10 @@
  * has ever sent one, so the platform disclosure had never fired anywhere and
  * emotion inference ran full for everyone by default rather than by decision.
  *
- * This script does NOT own prompts. Each app owns its own brain. The two hand
- * maintained personas below carry a `prompt` patch only because their prompt
- * lives nowhere but in the Tavus dashboard, and one of them was naming a second
- * company on a customer facing surface.
+ * This script does NOT own prompts. Each app owns its own brain. The one hand
+ * maintained persona below carries a `prompt` patch only because its prompt lives
+ * nowhere but in the Tavus dashboard, and it was naming a second company in front
+ * of a paying room.
  */
 import { AI_DISCLOSURE_COPY } from "../src/lib/aiDisclosure.js";
 
@@ -100,6 +100,13 @@ const CODE_OWNED = [
   // longer true. It renders no clips, so unlike the luna-demo recorder there is
   // nothing a spoken disclosure would be baked into.
   { id: "p4760a22e886", label: "Jacob ElevenLabs voice test (fleet-video jacob-tavus chip)" },
+  // Moved out of HAND_MAINTAINED on 2026-08-09. Her prompt used to live nowhere
+  // but the Tavus dashboard, so this script carried a one line edit to it. It now
+  // lives in src/personas/courtney.js and ships via scripts/sync-courtney-face.mjs,
+  // which builds her whole brain, so the edit here would only fight it. That
+  // script builds with platformDisclosure true precisely BECAUSE this one pins her
+  // to "always"; the two are a pair and moving either needs the other re-run.
+  { id: "pdac8c14acb7", label: "Courtney face (fleet-luna + fleet-video courtney-tavus chip)" },
 ];
 
 /**
@@ -109,22 +116,6 @@ const CODE_OWNED = [
  * @type {{id: string, label: string, edits: Array<[RegExp|string, string]>}[]}
  */
 const HAND_MAINTAINED = [
-  {
-    id: "pdac8c14acb7",
-    label: "Courtney Black Raven",
-    edits: [
-      // She has no greeting set at all, so "say it in your first sentence" was
-      // the ONLY disclosure on this persona and it was left to the model to
-      // remember. The platform says it now, before her first word, so this
-      // instruction would make her say it twice.
-      [
-        "Say you are an AI in your first sentence.",
-        "Your AI disclosure is spoken for you before your first word, so do not open by " +
-          "repeating it. If anyone asks whether you are real, human, or a recording, answer no " +
-          "immediately and without qualification. Never claim to have used a product yourself.",
-      ],
-    ],
-  },
   {
     id: "p78505f0a908",
     label: "Luna EO Summit Host",
