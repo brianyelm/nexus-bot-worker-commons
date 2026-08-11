@@ -33,8 +33,23 @@ function harness(opts = {}) {
     const href = typeof url === "string" ? url : url.url;
     calls.push({ url: href, init });
     if (href.includes("/api/bot-reply")) {
+      if (opts.webhookRedirect) {
+        return new Response(null, {
+          status: 302,
+          headers: { location: "https://blackravenit.cloudflareaccess.com/login" },
+        });
+      }
+      if (opts.webhookHtml) {
+        return new Response("<html>login</html>", {
+          status: 200,
+          headers: { "content-type": "text/html" },
+        });
+      }
       const status = opts.webhookStatus ?? 200;
-      return new Response(JSON.stringify({ ok: status === 200 }), { status });
+      return new Response(JSON.stringify({ ok: status === 200 }), {
+        status,
+        headers: { "content-type": "application/json" },
+      });
     }
     return new Response(JSON.stringify({ success: true, message: { id: "m1" } }), { status: 200 });
   };
@@ -152,6 +167,31 @@ test("a missing delivery secret does not throw and still saves the answer", asyn
   assert.equal(result.delivered, false);
   assert.equal(result.postedToHomeChannel, true);
   assert.equal(calls.filter((c) => c.url.includes("/api/bot-reply")).length, 0);
+});
+
+// An identity proxy in front of FleetView answers an unauthenticated POST with
+// a redirect to its login page. Following it returns a perfectly healthy 200 of
+// HTML, so a naive res.ok check reports the answer delivered while it went
+// nowhere. This is the exact failure that ate the first live FleetView turn.
+test("a redirect to a login page is a failure, not a delivery", async () => {
+  const { env, calls } = harness({ webhookRedirect: true });
+  const result = await withProvenance("mention-reply", () =>
+    deliverFleetViewReply(env, { ...baseArgs, answer: "Four shipped late." }));
+
+  assert.equal(result.delivered, false);
+  assert.equal(result.postedToHomeChannel, true, "the answer must survive an intercepted callback");
+  const attempts = calls.filter((c) => c.url.includes("/api/bot-reply"));
+  assert.equal(attempts.length, 1, "an intercepted path will not fix itself on retry");
+  assert.equal(attempts[0].init.redirect, "manual");
+});
+
+test("a 200 of HTML is a failure, not a delivery", async () => {
+  const { env } = harness({ webhookHtml: true });
+  const result = await withProvenance("mention-reply", () =>
+    deliverFleetViewReply(env, { ...baseArgs, answer: "Four shipped late." }));
+
+  assert.equal(result.delivered, false);
+  assert.equal(result.postedToHomeChannel, true);
 });
 
 test("an errored turn reports the error and does not mirror", async () => {

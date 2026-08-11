@@ -102,9 +102,33 @@ async function postSignedReply(env, replyWebhook, payload) {
           "X-Nexus-Signature": signature,
         },
         body: rawBody,
+        // Never follow a redirect. An identity proxy in front of FleetView
+        // answers an unauthenticated POST with a 302 to its login page, and
+        // following it yields a cheerful 200 of HTML: the delivery reports
+        // success and the answer is silently lost. A 3xx here means the
+        // callback path is not actually reaching the worker.
+        redirect: "manual",
         signal: AbortSignal.timeout(WEBHOOK_TIMEOUT_MS),
       });
-      if (res.ok) return true;
+
+      if (res.status >= 300 && res.status < 400) {
+        console.error(
+          `[fleetview] reply webhook redirected (${res.status} to ${res.headers.get("location") || "?"}); ` +
+          "the callback path is being intercepted before it reaches FleetView",
+        );
+        return false;
+      }
+
+      // A success status carrying HTML is the same interception wearing a
+      // different hat. FleetView always answers JSON.
+      if (res.ok) {
+        const contentType = res.headers.get("content-type") || "";
+        if (!contentType.includes("json")) {
+          console.error(`[fleetview] reply webhook returned ${res.status} with content-type "${contentType}", not JSON`);
+          return false;
+        }
+        return true;
+      }
       const txt = await res.text().catch(() => "");
       console.warn(`[fleetview] reply webhook ${res.status} (attempt ${attempt}): ${txt.slice(0, 200)}`);
       // A rejected signature or a bad thread id will not fix itself on retry.
