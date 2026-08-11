@@ -47,6 +47,7 @@ import { phoenixToday } from "../lib/format.js";
 import { buildActionBreadcrumb } from "../lib/actionTrace.js";
 import { scrubFleetDashes } from "../lib/sanitize.js";
 import { collectSearchResultUrls, groundUrlsInText } from "../lib/researchShare.js";
+import { applyRelayToolPolicy } from "../lib/fleetRelay.js";
 
 // Detect GIF-only messages so bots receive "[GIF image: <url>]" instead of
 // a bare CDN URL they cannot interpret.
@@ -524,6 +525,7 @@ export async function runLlmPipeline({
   historyKey,
   attachments,
   reply_to,
+  requester_is_bot,
   config,
 }) {
   const nexusOptions = { nexusKeyEnvVar: config.nexusKeyEnvVar };
@@ -1167,14 +1169,35 @@ export async function runLlmPipeline({
       };
     };
 
-    const mergedTools = [...(config.tools.definitions || []), channelHistoryTool, loadAttachmentTool, viewGifTool, rememberTool];
-    const mergedHandlers = {
+    let mergedTools = [...(config.tools.definitions || []), channelHistoryTool, loadAttachmentTool, viewGifTool, rememberTool];
+    let mergedHandlers = {
       ...(config.tools.handlers || {}),
       read_channel_history: channelHistoryHandler,
       nexus_load_attachment: loadAttachmentHandler,
       nexus_view_gif: viewGifHandler,
       remember: rememberHandler,
     };
+
+    // ---- Fleet relay Gate 2: authority downgrade --------------------------
+    // When this turn was triggered by ANOTHER BOT rather than a person, the
+    // full tool set is replaced by that bot's relay allowlist (default deny,
+    // lib/fleetRelay.js). A relay must never become a way to launder authority:
+    // the sending bot has no CRM/Xero/S1 access, so a request from it must not
+    // reach anything the sender could not have been trusted with directly.
+    // The allowlist also omits message_bot, which is what enforces hop limit 1.
+    if (requester_is_bot) {
+      const gated = applyRelayToolPolicy({
+        selfBot: config.botName,
+        tools: mergedTools,
+        handlers: mergedHandlers,
+      });
+      console.warn(
+        `[fleetRelay] bot-originated turn for ${config.botName} from ${user_id} in ${channel_slug}: ` +
+        `${mergedTools.length} tools downgraded to ${gated.tools.length} (${gated.allowed.join(", ") || "none"})`,
+      );
+      mergedTools = gated.tools;
+      mergedHandlers = gated.handlers;
+    }
 
     const modelOptions = {
       // Re-arm the typing indicator before every Anthropic POST so
@@ -1201,7 +1224,7 @@ export async function runLlmPipeline({
         history,
         mergedTools,
         mergedHandlers,
-        { user_id, user_email, display_name, channel_slug },
+        { user_id, user_email, display_name, channel_slug, requester_is_bot },
         modelOptions,
       );
     } catch (modelErr) {
@@ -1225,7 +1248,7 @@ export async function runLlmPipeline({
         history,
         mergedTools,
         mergedHandlers,
-        { user_id, user_email, display_name, channel_slug },
+        { user_id, user_email, display_name, channel_slug, requester_is_bot },
         modelOptions,
       );
     }
@@ -1935,7 +1958,18 @@ async function handleChatMessageInner(request, env, ctx, config) {
     trigger_type,
     reply_to,
     attachments,
+    // Set by nexus-app from users.is_bot on the message author. Drives the
+    // fleet-relay authority downgrade (Gate 2): a turn triggered by another
+    // bot runs against a default-deny tool allowlist, never the full set.
+    // Absent on older nexus-app builds, in which case the bot_ id prefix is
+    // the fallback -- but the explicit flag is authoritative when present.
+    author_is_bot,
   } = payload || {};
+
+  const requesterIsBot =
+    typeof author_is_bot === "boolean"
+      ? author_is_bot
+      : typeof user_id === "string" && user_id.startsWith("bot_");
 
   // user_id + channel_slug are always required. Body is optional when at
   // least one attachment was supplied (drag-and-drop a PDF with no caption);
@@ -2227,6 +2261,7 @@ async function handleChatMessageInner(request, env, ctx, config) {
     labeledUserText,
     historyKey,
     attachments,
+    requester_is_bot: requesterIsBot,
     // Pass reply_to so the LLM pipeline posts into the same thread.
     // undefined is omitted by JSON.stringify so no-thread messages stay clean.
     reply_to: reply_to || undefined,

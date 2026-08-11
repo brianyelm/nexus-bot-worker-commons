@@ -48,6 +48,17 @@ export { looksLikeIncomingPayment } from "./lib/incomingPayment.js";
 export { memoryHmacHex, buildMemoryAuthHeaders } from "./lib/memoryAuth.js";
 export { postToNexus, uploadBotAttachment, attachImagesFromUrls, attachButtons, attachSelectMenus, disableMessageButtons, settleMessageComponents, settleHitlCard, attachModals, editNexusMessage, fetchChannelMessages, fetchThreadMessages, sendNexusHeartbeat, sendTyping, pingBotPresence } from "./lib/nexus.js";
 export { withProvenance, getProvenanceContext } from "./lib/provenanceContext.js";
+export {
+  buildFleetRelayTools,
+  applyRelayToolPolicy,
+  fleetRelayPolicyFor,
+  isRelayEdgeAllowed,
+  relayEdgeCount,
+  FLEET_RELAY_ROUTES,
+  RELAY_TOOL_POLICY,
+  RELAY_FORBIDDEN_TARGETS,
+  RELAY_EXCLUDED_CHANNELS,
+} from "./lib/fleetRelay.js";
 export { crmReadTools, crmReadHandlers } from "./lib/crmCodes.js";
 export {
   kbProfileReadTools, kbProfileReadHandlers,
