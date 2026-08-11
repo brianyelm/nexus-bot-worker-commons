@@ -14,3 +14,16 @@ export const chatMessageFixture = {
   attachments: [],
   timestamp: 1716740000000,
 };
+
+// FleetView dispatch of the same shape. Identical to the Nexus payload plus
+// the three routing fields that select webhook delivery. channel_slug is the
+// bot's HOME channel: FleetView has no channel of its own, and the home channel
+// is where a substantive answer gets mirrored.
+export const chatMessageFleetViewFixture = {
+  ...chatMessageFixture,
+  message_id: "fv-msg-abc123",
+  body: "@maxwell what's our AR aging this week?",
+  source: "fleetview",
+  reply_webhook: "https://fleet.blackravenit.com/api/bot-reply",
+  thread_id: "fv-thread-abc123",
+};

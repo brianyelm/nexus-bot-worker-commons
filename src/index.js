@@ -59,6 +59,12 @@ export {
   RELAY_FORBIDDEN_TARGETS,
   RELAY_EXCLUDED_CHANNELS,
 } from "./lib/fleetRelay.js";
+export {
+  isFleetViewSource,
+  deliverFleetViewReply,
+  shouldMirrorToHomeChannel,
+  FLEETVIEW_SOURCE,
+} from "./lib/fleetviewDelivery.js";
 export { crmReadTools, crmReadHandlers } from "./lib/crmCodes.js";
 export {
   kbProfileReadTools, kbProfileReadHandlers,

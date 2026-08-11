@@ -143,6 +143,20 @@ export default {
    f. postToNexus(env, channel_slug, visibleResponse) if non-empty.
    Every step inside waitUntil is wrapped in try/catch with console error logging. It has no caller to surface failures to.
 
+### FleetView dispatch
+
+FleetView (fleet.blackravenit.com) posts to the same route with the same per-bot HMAC secret, so the persona, tools, memory, and HITL path are identical. Three optional payload fields select the alternate delivery:
+
+- `source: "fleetview"` (absent or "nexus" keeps the normal channel delivery)
+- `reply_webhook` absolute FleetView callback URL
+- `thread_id` correlation id echoed back on the reply
+
+In FleetView mode, step 8f is replaced by `deliverFleetViewReply` (lib/fleetviewDelivery.js): the answer is POSTed to `reply_webhook`, signed with `FLEETVIEW_DELIVERY_SECRET` in the same `"<unix-seconds>.<rawBody>"` form so the receiver verifies it with verifyNexusSignature. Answers over 1200 chars, and any turn that staged a HITL card, are also posted to the bot's home channel. If the webhook cannot be reached the answer goes to the home channel regardless, so a finished turn is never lost.
+
+Channel-scoped side effects are suppressed in FleetView mode: no typing frames and no auto-listen KV flag, since `channel_slug` there is the bot's home channel rather than a conversation anyone is watching. `!commands` buffer their ctx.reply output and ship it back on the same webhook. HITL approval cards still go only to the bot's `<bot>-hitl` channel.
+
+Requires `FLEETVIEW_DELIVERY_SECRET` on the bot worker.
+
 ### Return values
 
 - 200 { success: true }                      on bang-cmd dispatch

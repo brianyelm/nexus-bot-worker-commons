@@ -1,0 +1,165 @@
+// Tests for lib/fleetviewDelivery.js -- the FleetView reply path.
+//
+// The invariants that matter here are: a FleetView turn never silently loses
+// an answer, the home channel does not become a transcript of every question,
+// and the webhook body is signed over the exact bytes that get sent.
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  isFleetViewSource,
+  shouldMirrorToHomeChannel,
+  deliverFleetViewReply,
+  FLEETVIEW_SOURCE,
+} from "../src/lib/fleetviewDelivery.js";
+import { verifyNexusSignature } from "../src/lib/callbackSign.js";
+import { withProvenance } from "../src/lib/provenanceContext.js";
+import { chatMessageFixture, chatMessageFleetViewFixture } from "../contracts/fixtures/chat-message.js";
+
+const SECRET = "test-fleetview-delivery-secret";
+
+/**
+ * Minimal env plus a fetch stub that records every outbound call.
+ * @param {object} [opts]
+ * @returns {{env: object, calls: Array<object>}}
+ */
+function harness(opts = {}) {
+  const calls = [];
+  const env = {
+    FLEETVIEW_DELIVERY_SECRET: opts.secret === undefined ? SECRET : opts.secret,
+    NEXUS_BASE_URL: "https://nexus.example.com",
+    TEST_NEXUS_KEY: "test-bot-key",
+  };
+  globalThis.fetch = async (url, init) => {
+    const href = typeof url === "string" ? url : url.url;
+    calls.push({ url: href, init });
+    if (href.includes("/api/bot-reply")) {
+      const status = opts.webhookStatus ?? 200;
+      return new Response(JSON.stringify({ ok: status === 200 }), { status });
+    }
+    return new Response(JSON.stringify({ success: true, message: { id: "m1" } }), { status: 200 });
+  };
+  return { env, calls };
+}
+
+const baseArgs = {
+  replyWebhook: "https://fleet.blackravenit.com/api/bot-reply",
+  threadId: "fv-thread-1",
+  botName: "kate",
+  homeChannelSlug: "kate-cs",
+  question: "how many orders shipped late",
+  askedBy: "Brian",
+  nexusOptions: { nexusKeyEnvVar: "TEST_NEXUS_KEY" },
+};
+
+// --- source selection --------------------------------------------------------
+
+test("only the fleetview source selects webhook delivery", () => {
+  assert.equal(isFleetViewSource(FLEETVIEW_SOURCE), true);
+  assert.equal(isFleetViewSource("nexus"), false);
+  assert.equal(isFleetViewSource(undefined), false);
+});
+
+test("the nexus fixture carries no source, the fleetview fixture does", () => {
+  assert.equal(chatMessageFixture.source, undefined);
+  assert.equal(chatMessageFleetViewFixture.source, FLEETVIEW_SOURCE);
+  assert.ok(chatMessageFleetViewFixture.reply_webhook.startsWith("https://"));
+  assert.ok(chatMessageFleetViewFixture.thread_id);
+});
+
+// --- home channel mirroring --------------------------------------------------
+
+test("short chat answers stay out of the home channel", () => {
+  assert.equal(shouldMirrorToHomeChannel("Four orders shipped late."), false);
+});
+
+test("report-length answers mirror to the home channel", () => {
+  assert.equal(shouldMirrorToHomeChannel("x".repeat(1201)), true);
+});
+
+test("a staged HITL card mirrors regardless of length", () => {
+  assert.equal(
+    shouldMirrorToHomeChannel("Queued.", { stagedAction: { description: "isolate host", channel: "kate-hitl" } }),
+    true,
+  );
+});
+
+// --- delivery ----------------------------------------------------------------
+
+test("a short answer delivers to the webhook only", async () => {
+  const { env, calls } = harness();
+  const result = await withProvenance("mention-reply", () =>
+    deliverFleetViewReply(env, { ...baseArgs, answer: "Four shipped late." }));
+
+  assert.deepEqual(result, { delivered: true, postedToHomeChannel: false });
+  assert.equal(calls.length, 1);
+  assert.ok(calls[0].url.endsWith("/api/bot-reply"));
+});
+
+test("the webhook body is signed over the exact bytes sent", async () => {
+  const { env, calls } = harness();
+  await withProvenance("mention-reply", () =>
+    deliverFleetViewReply(env, { ...baseArgs, answer: "Four shipped late." }));
+
+  const { init } = calls[0];
+  const ok = await verifyNexusSignature(SECRET, init.body, new Headers(init.headers));
+  assert.equal(ok, true, "FleetView must be able to verify the delivery with the shared secret");
+
+  const parsed = JSON.parse(init.body);
+  assert.equal(parsed.thread_id, "fv-thread-1");
+  assert.equal(parsed.bot, "kate");
+  assert.equal(parsed.answer, "Four shipped late.");
+  assert.equal(parsed.posted_to_home_channel, false);
+  assert.equal(parsed.home_channel_slug, "kate-cs");
+});
+
+test("a long answer mirrors to the home channel and says so in the payload", async () => {
+  const { env, calls } = harness();
+  const long = "finding line\n".repeat(200);
+  const result = await withProvenance("mention-reply", () =>
+    deliverFleetViewReply(env, { ...baseArgs, answer: long }));
+
+  assert.equal(result.postedToHomeChannel, true);
+  const nexusPosts = calls.filter((c) => !c.url.includes("/api/bot-reply"));
+  assert.ok(nexusPosts.length >= 1, "the report must reach the home channel");
+  const webhook = calls.find((c) => c.url.includes("/api/bot-reply"));
+  assert.equal(JSON.parse(webhook.init.body).posted_to_home_channel, true);
+});
+
+test("an undeliverable webhook falls back to the home channel", async () => {
+  const { env, calls } = harness({ webhookStatus: 500 });
+  const result = await withProvenance("mention-reply", () =>
+    deliverFleetViewReply(env, { ...baseArgs, answer: "Four shipped late." }));
+
+  assert.equal(result.delivered, false);
+  assert.equal(result.postedToHomeChannel, true, "a finished answer must never be discarded");
+  assert.ok(calls.some((c) => !c.url.includes("/api/bot-reply")));
+});
+
+test("a 401 from the webhook is not retried", async () => {
+  const { env, calls } = harness({ webhookStatus: 401 });
+  await withProvenance("mention-reply", () =>
+    deliverFleetViewReply(env, { ...baseArgs, answer: "Four shipped late." }));
+
+  const attempts = calls.filter((c) => c.url.includes("/api/bot-reply"));
+  assert.equal(attempts.length, 1, "a rejected signature will not fix itself on retry");
+});
+
+test("a missing delivery secret does not throw and still saves the answer", async () => {
+  const { env, calls } = harness({ secret: null });
+  const result = await withProvenance("mention-reply", () =>
+    deliverFleetViewReply(env, { ...baseArgs, answer: "Four shipped late." }));
+
+  assert.equal(result.delivered, false);
+  assert.equal(result.postedToHomeChannel, true);
+  assert.equal(calls.filter((c) => c.url.includes("/api/bot-reply")).length, 0);
+});
+
+test("an errored turn reports the error and does not mirror", async () => {
+  const { env, calls } = harness();
+  const result = await withProvenance("mention-reply", () =>
+    deliverFleetViewReply(env, { ...baseArgs, answer: "x".repeat(2000), error: "Anthropic timeout" }));
+
+  assert.equal(result.postedToHomeChannel, false, "a failed turn is not a report");
+  const webhook = calls.find((c) => c.url.includes("/api/bot-reply"));
+  assert.equal(JSON.parse(webhook.init.body).error, "Anthropic timeout");
+});

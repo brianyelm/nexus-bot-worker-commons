@@ -48,6 +48,7 @@ import { buildActionBreadcrumb } from "../lib/actionTrace.js";
 import { scrubFleetDashes } from "../lib/sanitize.js";
 import { collectSearchResultUrls, groundUrlsInText } from "../lib/researchShare.js";
 import { applyRelayToolPolicy } from "../lib/fleetRelay.js";
+import { isFleetViewSource, deliverFleetViewReply } from "../lib/fleetviewDelivery.js";
 
 // Detect GIF-only messages so bots receive "[GIF image: <url>]" instead of
 // a bare CDN URL they cannot interpret.
@@ -526,8 +527,18 @@ export async function runLlmPipeline({
   attachments,
   reply_to,
   requester_is_bot,
+  source,
+  reply_webhook,
+  thread_id,
   config,
 }) {
+  // FleetView turns run this identical pipeline (same persona, tools, memory,
+  // HITL). Only the delivery differs: the answer is pushed back to the browser
+  // over a signed webhook instead of posted into the channel it came from, and
+  // channel-scoped side effects (typing frames, the auto-listen flag) are
+  // suppressed because channel_slug here is the bot's home channel, not a
+  // conversation anyone is watching.
+  const fleetView = isFleetViewSource(source);
   const nexusOptions = { nexusKeyEnvVar: config.nexusKeyEnvVar };
   // When the triggering message was part of a thread, reply_to is the
   // parent message id. Thread the same reply_to into every outbound post
@@ -578,7 +589,10 @@ export async function runLlmPipeline({
   // see a stale "typing" trail after the bot has actually returned. The
   // Nexus typing route resolves the bot identity from the Bearer key, so
   // commons does not need to know the bot user id here.
-  await sendTyping(env, channel_slug, "start", typingOptions);
+  // FleetView shows its own status line in the browser, and the home channel
+  // has no one waiting on a typing frame, so skip the indicator entirely there.
+  const typing = (state) => (fleetView ? Promise.resolve() : sendTyping(env, channel_slug, state, typingOptions));
+  await typing("start");
 
   try {
     history = await loadHistory(env, historyKey, { dbBinding: config.dbBinding });
@@ -933,7 +947,18 @@ export async function runLlmPipeline({
       " help with?\", \"Want me to do anything else?\" and similar empty closers. A genuine clarifying" +
       " question (you actually need a decision or detail to proceed) or a natural conversational beat" +
       " is fine; a reflexive service-desk sign-off is not.";
-    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_EMAIL_SAFETY + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + NEXUS_INFRA_GROUNDING + NEXUS_STYLE_CLOSE + memoryRecallBlock + threadContextBlock + channelContextBlock + hitlContextBlock;
+    // FleetView is Brian's laptop launcher: a one-to-one panel, not a channel.
+    // The answer he reads is the panel text, and anything long is separately
+    // mirrored into the home channel by the delivery layer, so the bot should
+    // lead with the answer rather than write for a channel audience.
+    const FLEETVIEW_SURFACE = fleetView
+      ? "\n\nSURFACE: this question came from FleetView, Brian's private bot panel, not from a Nexus channel." +
+        " You are talking to Brian one to one. Lead with the answer in the first sentence and keep it tight;" +
+        " no channel greetings, no @mentions, no \"posting this to the channel\" narration. Use your tools" +
+        " exactly as you normally would. If the answer is genuinely long it is mirrored to your home channel" +
+        " automatically, so do not offer to post it there or ask whether he wants it written up."
+      : "";
+    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_EMAIL_SAFETY + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + NEXUS_INFRA_GROUNDING + NEXUS_STYLE_CLOSE + FLEETVIEW_SURFACE + memoryRecallBlock + threadContextBlock + channelContextBlock + hitlContextBlock;
 
     const channelHistoryTool = {
       name: "read_channel_history",
@@ -1254,13 +1279,23 @@ export async function runLlmPipeline({
     }
   } catch (err) {
     console.error("[handleChatMessage] pipeline error:", err.message);
+    const snag = "Hit a snag running that one. Try again in a moment or check the worker logs.";
     try {
-      await postToNexus(
-        env,
-        channel_slug,
-        "Hit a snag running that one. Try again in a moment or check the worker logs.",
-        nexusOptions,
-      );
+      if (fleetView) {
+        await deliverFleetViewReply(env, {
+          replyWebhook: reply_webhook,
+          threadId: thread_id,
+          botName: config.botName,
+          homeChannelSlug: channel_slug,
+          answer: snag,
+          question: userText,
+          askedBy: display_name,
+          error: err.message || "pipeline error",
+          nexusOptions,
+        });
+      } else {
+        await postToNexus(env, channel_slug, snag, nexusOptions);
+      }
     } catch { /* ignore */ }
     return;
   } finally {
@@ -1269,7 +1304,7 @@ export async function runLlmPipeline({
     // beneath the just-posted reply), but an explicit stop covers
     // error paths where no message is ever posted.
     try {
-      await sendTyping(env, channel_slug, "stop", typingOptions);
+      await typing("stop");
     } catch { /* ignore */ }
   }
 
@@ -1289,7 +1324,7 @@ export async function runLlmPipeline({
         cache_creation_input_tokens: capturedUsage.cache_creation_input_tokens,
         cache_read_input_tokens: capturedUsage.cache_read_input_tokens,
         channel_slug,
-        surface: "chat",
+        surface: fleetView ? "fleetview" : "chat",
         ts: new Date().toISOString(),
       }),
       signal: AbortSignal.timeout(5000),
@@ -1332,12 +1367,14 @@ export async function runLlmPipeline({
           channel: approvalSlug,
         };
         if (!visibleResponse) {
-          await postToNexus(
-            env,
-            channel_slug,
-            `Response action sent to ${approvalSlug} for authorization. Risk: ${(action.risk || "?").toUpperCase()}`,
-            nexusOptions,
-          );
+          const staged = `Response action sent to ${approvalSlug} for authorization. Risk: ${(action.risk || "?").toUpperCase()}`;
+          // In FleetView the approval card still goes to the bot's HITL channel
+          // only. The browser just gets told where to go approve it.
+          if (fleetView) {
+            visibleResponse = staged;
+          } else {
+            await postToNexus(env, channel_slug, staged, nexusOptions);
+          }
         }
       } catch (err) {
         console.error("[handleChatMessage] HITL postApprovalCard error:", err.message);
@@ -1390,6 +1427,28 @@ export async function runLlmPipeline({
     } catch (err) {
       console.warn("[handleChatMessage] memory service persist:", err?.message);
     }
+  }
+
+  if (fleetView) {
+    const answer = visibleResponse
+      || "I worked through that but did not land on a clean answer. Give me one more detail or rephrase it and I will take another pass.";
+    try {
+      await deliverFleetViewReply(env, {
+        replyWebhook: reply_webhook,
+        threadId: thread_id,
+        botName: config.botName,
+        homeChannelSlug: channel_slug,
+        answer,
+        question: userText,
+        askedBy: display_name,
+        toolTrace,
+        stagedAction,
+        nexusOptions,
+      });
+    } catch (err) {
+      console.error("[handleChatMessage] fleetview delivery error:", err.message);
+    }
+    return;
   }
 
   if (visibleResponse) {
@@ -1964,6 +2023,11 @@ async function handleChatMessageInner(request, env, ctx, config) {
     // Absent on older nexus-app builds, in which case the bot_ id prefix is
     // the fallback -- but the explicit flag is authoritative when present.
     author_is_bot,
+    // FleetView dispatch (fleet.blackravenit.com). Absent on Nexus traffic,
+    // which keeps the default "nexus" delivery path. See lib/fleetviewDelivery.js.
+    source,
+    reply_webhook,
+    thread_id,
   } = payload || {};
 
   const requesterIsBot =
@@ -2078,6 +2142,11 @@ async function handleChatMessageInner(request, env, ctx, config) {
        */
       let isFirstReply = true;
       const botFirstWord = String(botDisplayName || "Bot").split(/\s+/)[0];
+      // A !command typed in FleetView has no channel to answer into. Collect
+      // every ctx.reply() and ship the joined output back over the webhook when
+      // the handler finishes, so !status behaves the same on both surfaces.
+      const cmdIsFleetView = isFleetViewSource(source);
+      const fleetViewReplies = [];
       const cmdCtx = {
         verb,
         args,
@@ -2105,6 +2174,10 @@ async function handleChatMessageInner(request, env, ctx, config) {
             finalText = body;
           }
           isFirstReply = false;
+          if (cmdIsFleetView) {
+            fleetViewReplies.push(finalText);
+            return;
+          }
           await postToNexus(env, channel_slug, finalText, nexusOptions);
         },
         user_id,
@@ -2121,11 +2194,15 @@ async function handleChatMessageInner(request, env, ctx, config) {
       // duplicate message storms (bug 2026-05-13).
       ctx.waitUntil(
         withProvenance("user-command", async () => {
+          let cmdError = null;
           try {
             await handler(cmdCtx);
           } catch (err) {
+            cmdError = err.message;
             console.error(`[handleChatMessage] command error !${verb}:`, err.message);
-            if (!replied) {
+            if (cmdIsFleetView) {
+              fleetViewReplies.push(`Command error: ${err.message}`);
+            } else if (!replied) {
               // Surface command errors as a bangReport so the visual contract
               // holds even when a handler throws.
               await postToNexus(
@@ -2140,6 +2217,23 @@ async function handleChatMessageInner(request, env, ctx, config) {
                 nexusOptions,
               ).catch(() => {});
             }
+          }
+
+          if (cmdIsFleetView) {
+            const joined = fleetViewReplies.join("\n\n").trim();
+            await deliverFleetViewReply(env, {
+              replyWebhook: reply_webhook,
+              threadId: thread_id,
+              botName: config.botName,
+              homeChannelSlug: channel_slug,
+              answer: joined || `!${verb} produced no output.`,
+              question: msgBody,
+              askedBy: display_name,
+              error: cmdError,
+              nexusOptions,
+            }).catch((err) => {
+              console.error(`[handleChatMessage] fleetview command delivery error !${verb}:`, err?.message);
+            });
           }
         })
       );
@@ -2266,6 +2360,11 @@ async function handleChatMessageInner(request, env, ctx, config) {
     // undefined is omitted by JSON.stringify so no-thread messages stay clean.
     reply_to: reply_to || undefined,
     provenance: "mention-reply",
+    // Carried through the LlmRoom DO job payload so the pipeline knows to
+    // deliver the answer back to FleetView instead of into the channel.
+    source: source || undefined,
+    reply_webhook: reply_webhook || undefined,
+    thread_id: thread_id || undefined,
   };
 
   ctx.waitUntil(dispatchLlmJob(env, historyKey, llmJob, config));
