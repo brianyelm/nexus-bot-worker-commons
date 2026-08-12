@@ -316,7 +316,11 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
  * @returns {Promise<string>} Final assistant text
  */
 export async function callAnthropicWithTools(env, systemPrompt, messages, tools, handlers, ctx = {}, options = {}) {
-  const model = env.CLAUDE_MODEL || DEFAULT_MODEL;
+  // options.model first, matching callAnthropic. Without it a caller asking for
+  // a specific model on the TOOL path was silently ignored and got the fleet
+  // default, which is how FleetView's "run this turn on Haiku" did nothing at
+  // all and every spoken turn kept paying Sonnet's 1.6s to first token.
+  const model = options.model || env.CLAUDE_MODEL || DEFAULT_MODEL;
   const apiKey = env.ANTHROPIC_API_KEY;
 
   if (!apiKey) throw new Error("[anthropic] ANTHROPIC_API_KEY is not configured");
