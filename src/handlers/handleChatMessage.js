@@ -613,7 +613,11 @@ export async function runLlmPipeline({
     // Fed into the multimodal hand-off so the bot can SEE a GIF someone posted
     // a message or two ago when asked about it (not just the current turn).
     let historyGifUrls = [];
-    const ccEnabled = config.channelContext?.enabled !== false;
+    // FleetView turns skip channel context entirely. channel_slug there is the
+    // bot's home channel, which Brian is not looking at and did not ask about,
+    // so the fetch buys nothing and costs a Nexus round trip plus a pile of
+    // tokens in the prompt, both of which are silence on a spoken turn.
+    const ccEnabled = !fleetView && config.channelContext?.enabled !== false;
     const ccLimit = config.channelContext?.limit ?? 15;
     // The bot's own user id, so its own messages in the channel/thread feed are
     // labeled "(you)" instead of looking like a stranger's. Without this, a bot
@@ -739,7 +743,9 @@ export async function runLlmPipeline({
     // the user is already chatting IN the approval channel (avoids a
     // duplicate of the per-channel context fetch).
     let hitlContextBlock = "";
-    const hitlCtxEnabled = config.hitlContext?.enabled !== false;
+    // Same reasoning as channel context: another Nexus round trip for a channel
+    // nobody is looking at during a spoken turn.
+    const hitlCtxEnabled = !fleetView && config.hitlContext?.enabled !== false;
     const hitlCtxSlug = config.approvalSlug;
     const hitlCtxLimit = config.hitlContext?.limit ?? 8;
     if (hitlCtxEnabled && hitlCtxSlug && hitlCtxSlug !== channel_slug) {
@@ -1225,12 +1231,19 @@ export async function runLlmPipeline({
     }
 
     const modelOptions = {
+      // FleetView is a spoken turn: Brian is sitting there listening to
+      // silence while this runs, and Sonnet costs 1.6s to first token before
+      // it has done any thinking at all. Haiku answers the same question in
+      // 0.5s. Nexus keeps Sonnet, where nobody is waiting on audio.
+      // Set FLEETVIEW_MODEL to override, or to the Nexus model to turn this off.
+      ...(fleetView ? { model: env.FLEETVIEW_MODEL || "claude-haiku-4-5-20251001" } : {}),
       // Re-arm the typing indicator before every Anthropic POST so
       // long tool loops (>90s total) don't lose the indicator on the
       // DO TTL. The initial start is sent above; this catches turns
       // 2+. Best-effort: sendTyping never throws.
       onTurnStart: (turnIndex) => {
         if (turnIndex === 0) return; // already armed above
+        if (fleetView) return; // no channel, no indicator, no round trip
         return sendTyping(env, channel_slug, "start", typingOptions);
       },
       onUsage: (usage) => { capturedUsage = usage; },
