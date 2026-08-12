@@ -539,6 +539,11 @@ export async function runLlmPipeline({
   // suppressed because channel_slug here is the bot's home channel, not a
   // conversation anyone is watching.
   const fleetView = isFleetViewSource(source);
+  // The model this turn runs on, resolved once so the call and the usage
+  // report can never disagree about it.
+  const effectiveModel = fleetView
+    ? (env.FLEETVIEW_MODEL || "claude-haiku-4-5-20251001")
+    : (env.CLAUDE_MODEL || "claude-opus-4-7");
   const nexusOptions = { nexusKeyEnvVar: config.nexusKeyEnvVar };
   // When the triggering message was part of a thread, reply_to is the
   // parent message id. Thread the same reply_to into every outbound post
@@ -1256,7 +1261,7 @@ export async function runLlmPipeline({
       // it has done any thinking at all. Haiku answers the same question in
       // 0.5s. Nexus keeps Sonnet, where nobody is waiting on audio.
       // Set FLEETVIEW_MODEL to override, or to the Nexus model to turn this off.
-      ...(fleetView ? { model: env.FLEETVIEW_MODEL || "claude-haiku-4-5-20251001" } : {}),
+      ...(fleetView ? { model: effectiveModel } : {}),
       // Re-arm the typing indicator before every Anthropic POST so
       // long tool loops (>90s total) don't lose the indicator on the
       // DO TTL. The initial start is sent above; this catches turns
@@ -1342,7 +1347,10 @@ export async function runLlmPipeline({
   }
 
   if (capturedUsage && env.USAGE_REPORT_URL) {
-    const model = env.CLAUDE_MODEL || "claude-opus-4-7";
+    // Report the model this turn ACTUALLY ran on. Reading env.CLAUDE_MODEL here
+    // reported the fleet default no matter what the turn used, which attributes
+    // FleetView's Haiku spend to Sonnet and makes the cost math quietly wrong.
+    const model = effectiveModel;
     fetch(env.USAGE_REPORT_URL, {
       method: "POST",
       headers: {
