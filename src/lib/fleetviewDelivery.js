@@ -209,6 +209,7 @@ export async function deliverFleetViewReply(env, args) {
     stagedAction = null,
     error = null,
     nexusOptions = {},
+    timings = null,
   } = args || {};
 
   const text = String(answer || "");
@@ -228,6 +229,7 @@ export async function deliverFleetViewReply(env, args) {
     tool_calls: toolTrace.map((t) => ({ name: t?.name || "?", error: Boolean(t?.error) })),
     staged_action: stagedAction ? { description: stagedAction.description, channel: stagedAction.channel } : null,
     posted_to_home_channel: postedToHomeChannel,
+    timings,
     home_channel_slug: homeChannelSlug || null,
     finished_at: new Date().toISOString(),
   };

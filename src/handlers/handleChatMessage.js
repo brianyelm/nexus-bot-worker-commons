@@ -539,6 +539,15 @@ export async function runLlmPipeline({
   // suppressed because channel_slug here is the bot's home channel, not a
   // conversation anyone is watching.
   const fleetView = isFleetViewSource(source);
+  // Phase timings for a spoken turn, shipped back with the answer.
+  //
+  // The pipeline runs inside the LlmRoom Durable Object's alarm handler, whose
+  // console output does NOT surface in `wrangler tail`. That makes latency work
+  // guesswork: the only observable numbers are the ones the turn carries out
+  // with it. So it carries them.
+  const t0 = Date.now();
+  const marks = {};
+  const mark = (name) => { marks[name] = Date.now() - t0; };
   // The model this turn runs on, resolved once so the call and the usage
   // report can never disagree about it.
   const effectiveModel = fleetView
@@ -601,6 +610,7 @@ export async function runLlmPipeline({
 
   try {
     history = await loadHistory(env, historyKey, { dbBinding: config.dbBinding });
+    mark("history");
 
     // Auto-fetch recent channel messages so the bot knows what the broader
     // conversation looks like, not just its own per-user history. Default ON;
@@ -887,6 +897,7 @@ export async function runLlmPipeline({
     }
 
     const factsBlock = await factsBlockPromise;
+    mark("recall_and_facts");
 
     const NEXUS_CONTEXT =
       "\n\nYou are on Nexus, Black Raven IT's internal communications platform." +
@@ -1296,6 +1307,7 @@ export async function runLlmPipeline({
     };
 
     try {
+      mark("prompt_built");
       responseText = await callAnthropicWithTools(
         env,
         systemPromptWithFacts,
@@ -1305,6 +1317,7 @@ export async function runLlmPipeline({
         { user_id, user_email, display_name, channel_slug, requester_is_bot },
         modelOptions,
       );
+      mark("model");
     } catch (modelErr) {
       // If the turn carried image/document blocks, the likeliest cause is
       // Anthropic rejecting an attachment (oversized image, animated GIF,
@@ -1484,6 +1497,7 @@ export async function runLlmPipeline({
         toolTrace,
         stagedAction,
         nexusOptions,
+        timings: { ...marks, total: Date.now() - t0 },
       });
     } catch (err) {
       console.error("[handleChatMessage] fleetview delivery error:", err.message);
