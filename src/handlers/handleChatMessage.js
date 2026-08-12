@@ -989,7 +989,22 @@ export async function runLlmPipeline({
         " exactly as you normally would. If the answer is genuinely long it is mirrored to your home channel" +
         " automatically, so do not offer to post it there or ask whether he wants it written up."
       : "";
-    const systemPromptWithFacts = (factsBlock ? systemPrompt + factsBlock : systemPrompt) + NEXUS_CONTEXT + NEXUS_EMAIL_SAFETY + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + NEXUS_INFRA_GROUNDING + NEXUS_STYLE_CLOSE + FLEETVIEW_SURFACE + memoryRecallBlock + threadContextBlock + channelContextBlock + hitlContextBlock;
+    // Two blocks, not one, and the split is the whole point.
+    //
+    // The persona (with its knowledge files) is the big stable half and is
+    // byte-identical from turn to turn, so it caches once and is read back
+    // cheaply forever. Everything after it changes every turn: the facts block,
+    // the user's name, today's date, memory recall, channel context. As a
+    // single block the volatile tail invalidated the persona along with it, and
+    // Jacob rewrote 34k tokens of cache on EVERY turn instead of reading them.
+    //
+    // The concatenation order is exactly what it was before; only the cache
+    // boundary moved, so no bot sees a different prompt.
+    const volatileSystem = (factsBlock || "") + NEXUS_CONTEXT + NEXUS_EMAIL_SAFETY + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + NEXUS_INFRA_GROUNDING + NEXUS_STYLE_CLOSE + FLEETVIEW_SURFACE + memoryRecallBlock + threadContextBlock + channelContextBlock + hitlContextBlock;
+    const systemPromptWithFacts = [
+      { text: systemPrompt, cache: true },
+      { text: volatileSystem, cache: false },
+    ];
 
     const channelHistoryTool = {
       name: "read_channel_history",

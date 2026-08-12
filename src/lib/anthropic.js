@@ -228,13 +228,7 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
     // specific job into adaptive by passing options.thinking. No-op on the
     // Haiku/Sonnet-4.6 paths that already ran thinking-off. (2026-07-01 fleet bump.)
     thinking: options.thinking || { type: "disabled" },
-    system: [
-      {
-        type: "text",
-        text: systemPrompt,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
+    system: buildSystemBlocks(systemPrompt),
     messages: applyCacheToLastMessage(normalizeLeadingRole(messages)),
   };
   if (serverTools) body.tools = serverTools;
@@ -315,6 +309,35 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
  *   in the hook are caught and never break the tool loop.
  * @returns {Promise<string>} Final assistant text
  */
+/**
+ * Build the `system` parameter, splitting the cached prefix from the volatile
+ * tail when the caller supplies segments.
+ *
+ * A single system block means ONE cache entry covering everything, so any
+ * volatile byte in it (the date, the user's name, a facts block, a memory
+ * recall) invalidates the whole thing. That is how a 49k-token prompt ended up
+ * rewriting 34k of cache on every single turn: slower than a cache read, and
+ * billed at 1.25x for the privilege.
+ *
+ * Passing segments puts the breakpoint after the stable persona instead, so the
+ * big half is read from cache and only the small volatile half is reprocessed.
+ * Content and order are unchanged; only where the cache boundary sits moves.
+ *
+ * @param {string|Array<{text: string, cache?: boolean}>} systemPrompt
+ * @returns {Array<object>} Anthropic system blocks
+ */
+export function buildSystemBlocks(systemPrompt) {
+  if (typeof systemPrompt === "string") {
+    return [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }];
+  }
+
+  return systemPrompt
+    .filter((seg) => seg && seg.text)
+    .map((seg) => (seg.cache
+      ? { type: "text", text: seg.text, cache_control: { type: "ephemeral" } }
+      : { type: "text", text: seg.text }));
+}
+
 export async function callAnthropicWithTools(env, systemPrompt, messages, tools, handlers, ctx = {}, options = {}) {
   // options.model first, matching callAnthropic. Without it a caller asking for
   // a specific model on the TOOL path was silently ignored and got the fleet
@@ -334,13 +357,7 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
     // Pin thinking disabled by default (see callAnthropic note). Opt a job into
     // adaptive via options.thinking. No-op on Haiku/Sonnet-4.6 paths. (2026-07-01)
     thinking: options.thinking || { type: "disabled" },
-    system: [
-      {
-        type: "text",
-        text: systemPrompt,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
+    system: buildSystemBlocks(systemPrompt),
     tools: toolsWithCache,
   };
 
