@@ -840,7 +840,10 @@ export async function runLlmPipeline({
 
     history.push({ role: "user", content: userContent });
 
-    const factsBlock = await buildFactsBlock(env, user_id, { dbBinding: config.dbBinding });
+    // Kicked off here, awaited below with the memory recall. These are a D1
+    // read and a memory-worker round trip with nothing to say to each other,
+    // and running them one after the other spent both latencies in series.
+    const factsBlockPromise = buildFactsBlock(env, user_id, { dbBinding: config.dbBinding });
 
     // Cross-surface memory recall. Everything this bot hears -- chat, Nexus
     // voice, and Twilio phone -- is persisted to the memory-worker keyed by the
@@ -851,17 +854,34 @@ export async function runLlmPipeline({
     let memoryRecallBlock = "";
     // memBotId / MEM_STAFF are declared at function scope near memEntityId:
     // persistence and the `remember` tool need them AFTER this block closes.
+    const recall = async () => {
+      memEntityId = await resolveEntity(env, memBotId, { userId: user_id, email: user_email, displayName: display_name }, MEM_STAFF);
+      if (!memEntityId) return "";
+      const memCtx = await getEntityContext(env, memBotId, memEntityId, userText, MEM_STAFF);
+      return buildMemoryRecallBlock(memCtx, historyKey);
+    };
+
     if (env.MEMORY && config.botName && config.memoryRecall?.enabled !== false) {
       try {
-        memEntityId = await resolveEntity(env, memBotId, { userId: user_id, email: user_email, displayName: display_name }, MEM_STAFF);
-        if (memEntityId) {
-          const memCtx = await getEntityContext(env, memBotId, memEntityId, userText, MEM_STAFF);
-          memoryRecallBlock = buildMemoryRecallBlock(memCtx, historyKey);
-        }
+        // Recall is two sequential memory-worker hops (entity, then a Vectorize
+        // search). On a spoken turn that is a long time to stand there saying
+        // nothing, so FleetView bounds it: answer with what we know rather than
+        // wait indefinitely to know more. Nexus turns wait as long as it takes.
+        memoryRecallBlock = fleetView
+          ? await Promise.race([
+            recall(),
+            new Promise((resolve) => setTimeout(() => {
+              console.warn("[handleChatMessage] memory recall too slow for a spoken turn, answering without it");
+              resolve("");
+            }, Number(env.FLEETVIEW_RECALL_BUDGET_MS) || 900)),
+          ])
+          : await recall();
       } catch (err) {
         console.warn("[handleChatMessage] memory recall failed:", err?.message);
       }
     }
+
+    const factsBlock = await factsBlockPromise;
 
     const NEXUS_CONTEXT =
       "\n\nYou are on Nexus, Black Raven IT's internal communications platform." +
@@ -1420,6 +1440,33 @@ export async function runLlmPipeline({
   const assistantMemory = actionBreadcrumb
     ? `${responseText}\n\n${actionBreadcrumb}`
     : responseText;
+
+  // FleetView answers BEFORE writing anything down. Two D1 writes and a
+  // memory-service round trip sat between the finished answer and the delivery,
+  // and on a spoken turn every one of those milliseconds is Brian listening to
+  // silence. Persistence still happens, immediately below, just not while he
+  // waits: nothing downstream of here depends on the answer having been sent.
+  if (fleetView) {
+    const answer = visibleResponse
+      || "I worked through that but did not land on a clean answer. Give me one more detail or rephrase it and I will take another pass.";
+    try {
+      await deliverFleetViewReply(env, {
+        replyWebhook: reply_webhook,
+        threadId: thread_id,
+        botName: config.botName,
+        homeChannelSlug: channel_slug,
+        answer,
+        question: userText,
+        askedBy: display_name,
+        toolTrace,
+        stagedAction,
+        nexusOptions,
+      });
+    } catch (err) {
+      console.error("[handleChatMessage] fleetview delivery error:", err.message);
+    }
+  }
+
   try {
     await appendHistory(env, historyKey, "user", labeledUserText + attachmentBreadcrumb, { dbBinding: config.dbBinding });
     await appendHistory(env, historyKey, "assistant", assistantMemory, { dbBinding: config.dbBinding });
@@ -1442,27 +1489,8 @@ export async function runLlmPipeline({
     }
   }
 
-  if (fleetView) {
-    const answer = visibleResponse
-      || "I worked through that but did not land on a clean answer. Give me one more detail or rephrase it and I will take another pass.";
-    try {
-      await deliverFleetViewReply(env, {
-        replyWebhook: reply_webhook,
-        threadId: thread_id,
-        botName: config.botName,
-        homeChannelSlug: channel_slug,
-        answer,
-        question: userText,
-        askedBy: display_name,
-        toolTrace,
-        stagedAction,
-        nexusOptions,
-      });
-    } catch (err) {
-      console.error("[handleChatMessage] fleetview delivery error:", err.message);
-    }
-    return;
-  }
+  // Already answered above, before the writes.
+  if (fleetView) return;
 
   if (visibleResponse) {
     try {
