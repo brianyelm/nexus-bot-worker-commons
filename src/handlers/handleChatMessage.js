@@ -70,6 +70,28 @@ async function dispatchLlmJob(env, historyKey, job, config) {
   const bindingName = config.llmRoomBinding || "LLM_ROOM";
   const ns = env[bindingName];
 
+  // FleetView skips the Durable Object and runs inline.
+  //
+  // The DO exists to escape the ~30s waitUntil ceiling for long tool loops, and
+  // it pays for that with an alarm hop: measured at roughly a second of pure
+  // queue wait before the pipeline starts. On a chat message nobody notices. On
+  // a spoken question it is a second of silence at the front of every answer.
+  //
+  // The trade is real: a FleetView turn that runs past the waitUntil ceiling is
+  // cut off. Spoken questions are short by nature, and a turn that dies still
+  // surfaces as a stall in the FleetView panel rather than vanishing, so the
+  // second is worth more than the tail risk here.
+  if (isFleetViewSource(job.source)) {
+    try {
+      await withProvenance(job.provenance || "mention-reply", () =>
+        runLlmPipeline({ env, ...job, config })
+      );
+    } catch (err) {
+      console.error("[handleChatMessage] fleetview inline pipeline error:", err?.message);
+    }
+    return;
+  }
+
   if (!ns || typeof ns.idFromName !== "function") {
     console.warn(`[handleChatMessage] no ${bindingName} DO binding; running inline (may hit 30s waitUntil cap)`);
     try {
@@ -530,6 +552,7 @@ export async function runLlmPipeline({
   source,
   reply_webhook,
   thread_id,
+  dispatched_at,
   config,
 }) {
   // FleetView turns run this identical pipeline (same persona, tools, memory,
@@ -547,6 +570,10 @@ export async function runLlmPipeline({
   // with it. So it carries them.
   const t0 = Date.now();
   const marks = {};
+  // Time between the question being dispatched and this pipeline starting:
+  // the DO hop plus however long the alarm took to fire. Invisible from inside
+  // the pipeline otherwise, and it turned out to be seconds.
+  if (dispatched_at) marks.queue_wait = t0 - dispatched_at;
   const mark = (name) => { marks[name] = Date.now() - t0; };
   // The model this turn runs on, resolved once so the call and the usage
   // report can never disagree about it.
@@ -2106,6 +2133,9 @@ async function handleChatMessageInner(request, env, ctx, config) {
     source,
     reply_webhook,
     thread_id,
+    // When Nexus/FleetView sent this. Used only to measure how long the job
+    // waited for the LlmRoom alarm to fire.
+    timestamp,
   } = payload || {};
 
   const requesterIsBot =
@@ -2438,6 +2468,9 @@ async function handleChatMessageInner(request, env, ctx, config) {
     // undefined is omitted by JSON.stringify so no-thread messages stay clean.
     reply_to: reply_to || undefined,
     provenance: "mention-reply",
+    // When the question was dispatched, so the pipeline can report how long it
+    // sat in the DO queue before the alarm actually fired.
+    dispatched_at: timestamp || Date.now(),
     // Carried through the LlmRoom DO job payload so the pipeline knows to
     // deliver the answer back to FleetView instead of into the channel.
     source: source || undefined,
