@@ -54,6 +54,18 @@ import { isFleetViewSource, deliverFleetViewReply } from "../lib/fleetviewDelive
 // a bare CDN URL they cannot interpret.
 const GIF_URL_RE = /^https:\/\/(?:media\d*|i)\.giphy\.com\/|^https:\/\/media\.tenor\.com\//i;
 
+// Re-arm the "<bot> is typing..." indicator on a fixed clock for the whole
+// turn. The Nexus ChatRoom DO expires a bot typing entry after 90s
+// (BOT_TYPING_EXPIRY_MS), and the only other re-arm point is the
+// onTurnStart hook, which fires per Anthropic POST -- so a single slow
+// iteration (long model call plus a stack of tool executions: CRM writes,
+// vision, API retries) blows past 90s and the indicator vanishes while the
+// bot is still working, which reads as "the bot is broken" (Brian,
+// 2026-08-13, Jacob in #sales). 45s gives 2x margin under the DO's TTL and
+// also restores the entry within one beat if the ChatRoom DO hibernates
+// mid-turn and drops its in-memory typing map.
+const TYPING_HEARTBEAT_MS = 45_000;
+
 /**
  * Hand a chat-message job to the bot's LlmRoom Durable Object so the LLM
  * tool loop runs outside the calling worker's 30s waitUntil ceiling. Falls
@@ -625,8 +637,8 @@ export async function runLlmPipeline({
   // typing-start before invoking us, but the dispatch-side indicator
   // expires after 90s on the DO. For tool loops that exceed that window
   // (e.g. Maxwell running an AR query through Xero with retries) we keep
-  // it alive by re-arming the indicator before every Anthropic call via
-  // the onTurnStart hook, and clear it in finally below so users never
+  // it alive with the fixed 45s heartbeat below plus a re-arm before every
+  // Anthropic call (onTurnStart), and clear it in finally so users never
   // see a stale "typing" trail after the bot has actually returned. The
   // Nexus typing route resolves the bot identity from the Bearer key, so
   // commons does not need to know the bot user id here.
@@ -634,6 +646,10 @@ export async function runLlmPipeline({
   // has no one waiting on a typing frame, so skip the indicator entirely there.
   const typing = (state) => (fleetView ? Promise.resolve() : sendTyping(env, channel_slug, state, typingOptions));
   await typing("start");
+  // Fixed-interval heartbeat (see TYPING_HEARTBEAT_MS): the per-POST re-arm
+  // below cannot cover a single iteration that runs longer than the DO's 90s
+  // TTL. sendTyping never throws, so the tick needs no error handling.
+  const typingHeartbeat = fleetView ? null : setInterval(() => { typing("start"); }, TYPING_HEARTBEAT_MS);
 
   try {
     history = await loadHistory(env, historyKey, { dbBinding: config.dbBinding });
@@ -1396,6 +1412,7 @@ export async function runLlmPipeline({
     // clears on bot message arrival (so the user never sees "typing"
     // beneath the just-posted reply), but an explicit stop covers
     // error paths where no message is ever posted.
+    if (typingHeartbeat) clearInterval(typingHeartbeat);
     try {
       await typing("stop");
     } catch { /* ignore */ }
