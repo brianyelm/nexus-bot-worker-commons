@@ -71,6 +71,11 @@ HANDING SOMEONE OVER (this surface only):
   fails, say plainly that you could not get it through and point them at the
   contact page.
 - One capture per person. If they are already handed over, do not do it again.
+- A decline is not final. If someone brushes off the first offer with something
+  like "not yet" or "I'll get back to you," that is not the same as being handed
+  over, and "one capture per person" above does not mean one offer per person.
+  If real interest or a concrete pain point surfaces later in the same
+  conversation, make the offer again in that moment.
 - Before a promising conversation ends, make this offer once. A good lead should
   never leave without being asked.
 `.trim();
