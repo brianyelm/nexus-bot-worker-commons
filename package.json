@@ -13,6 +13,7 @@
     "./lib/contentJudge": "./src/lib/contentJudge.js",
     "./lib/actionTrace": "./src/lib/actionTrace.js",
     "./lib/callbackSign": "./src/lib/callbackSign.js",
+    "./lib/voicePersona": "./src/lib/voicePersona.js",
     "./lib/commandParser": "./src/lib/commandParser.js",
     "./lib/history": "./src/lib/history.js",
     "./lib/memory": "./src/lib/memory.js",

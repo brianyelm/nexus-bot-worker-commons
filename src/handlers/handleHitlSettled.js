@@ -37,7 +37,10 @@ export async function handleHitlSettled(request, env, { keyEnvVar, dbBinding = "
   const auth = request.headers.get("authorization") || "";
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
   const provided = bearer || request.headers.get("x-nexus-key") || "";
-  if (!expected || !provided || !(await timingSafeEqual(provided, expected))) {
+  // timingSafeEqual compares Uint8Arrays; raw strings XOR their chars to NaN
+  // (which |= to 0), so unencoded input would accept wrong same-length keys.
+  const enc = new TextEncoder();
+  if (!expected || !provided || !timingSafeEqual(enc.encode(provided), enc.encode(expected))) {
     return jsonResponse({ success: false, error: "Unauthorized" }, 401);
   }
 
