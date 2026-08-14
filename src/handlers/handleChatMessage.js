@@ -589,9 +589,15 @@ export async function runLlmPipeline({
   const mark = (name) => { marks[name] = Date.now() - t0; };
   // The model this turn runs on, resolved once so the call and the usage
   // report can never disagree about it.
+  // FleetView runs the bot's own Nexus model by default. The Haiku downgrade
+  // (2026-08-11, for spoken-turn latency) made FleetView answers audibly dumber
+  // than the same bot in Nexus, which reads as gibberish next to its own
+  // channel persona. Set FLEETVIEW_MODEL only to deliberately trade quality
+  // for latency again.
+  const nexusModel = env.CLAUDE_MODEL || "claude-opus-4-7";
   const effectiveModel = fleetView
-    ? (env.FLEETVIEW_MODEL || "claude-haiku-4-5-20251001")
-    : (env.CLAUDE_MODEL || "claude-opus-4-7");
+    ? (env.FLEETVIEW_MODEL || nexusModel)
+    : nexusModel;
   const nexusOptions = { nexusKeyEnvVar: config.nexusKeyEnvVar };
   // When the triggering message was part of a thread, reply_to is the
   // parent message id. Thread the same reply_to into every outbound post
@@ -1325,11 +1331,11 @@ export async function runLlmPipeline({
     }
 
     const modelOptions = {
-      // FleetView is a spoken turn: Brian is sitting there listening to
-      // silence while this runs, and Sonnet costs 1.6s to first token before
-      // it has done any thinking at all. Haiku answers the same question in
-      // 0.5s. Nexus keeps Sonnet, where nobody is waiting on audio.
-      // Set FLEETVIEW_MODEL to override, or to the Nexus model to turn this off.
+      // FleetView pins the resolved model explicitly so the turn and the usage
+      // report agree. By default this is the same model as a Nexus turn; a
+      // FLEETVIEW_MODEL override exists for anyone willing to trade answer
+      // quality for spoken-turn latency (Sonnet costs ~1.6s to first token
+      // where Haiku costs ~0.5s).
       ...(fleetView ? { model: effectiveModel } : {}),
       // Re-arm the typing indicator before every Anthropic POST so
       // long tool loops (>90s total) don't lose the indicator on the
