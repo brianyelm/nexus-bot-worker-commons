@@ -29,6 +29,8 @@
 /**
  * Base class for per-bot Reminder DO implementations.
  */
+import { withProvenance } from "../lib/provenanceContext.js";
+
 export class ReminderDOBase {
   /**
    * @param {DurableObjectState} state
@@ -110,7 +112,10 @@ export class ReminderDOBase {
   async alarm() {
     let res;
     try {
-      res = await this.fireDue(this.env);
+      // A DO alarm is a bare entry point: no scheduled() wrapper ever ran, so
+      // postToNexus inside fireDue would carry no provenance and Nexus 400s it
+      // (the 2026-08-14 lost-canary bug). Wrap here so every subclass is safe.
+      res = await withProvenance("scheduled-cron", () => this.fireDue(this.env));
       console.log(`[ReminderDO] alarm() fired ${res?.fired ?? "?"} reminders, ${res?.errors ?? "?"} errors`);
     } catch (err) {
       console.error("[ReminderDO] fireDue threw:", err?.stack || err);
