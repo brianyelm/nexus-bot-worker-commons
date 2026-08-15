@@ -385,7 +385,35 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
     usageAcc.cache_read_input_tokens += response.usage.cache_read_input_tokens || 0;
   }
 
-  while (response.stop_reason === "tool_use") {
+  // Hosted server tools (web_search) pause the turn mid-run instead of
+  // stopping on tool_use. Before this branch existed the loop treated
+  // pause_turn as a final answer, so any bot with the hosted search tool in
+  // its CHAT tool list shipped its own "Let me search..." narration as the
+  // reply and every search result was dropped on the floor (Flynn,
+  // 2026-08-15, #flynn-lab). Mirror the callAnthropic continuation: resend
+  // the accumulated content so Anthropic resumes the search, bounded so a
+  // stuck turn cannot loop.
+  let pauseContinuations = 0;
+  while (response.stop_reason === "tool_use" || response.stop_reason === "pause_turn") {
+    if (response.stop_reason === "pause_turn") {
+      pauseContinuations++;
+      if (pauseContinuations > 4) {
+        console.warn(`[anthropic] pause_turn limit reached after ${pauseContinuations} continuations; returning what we have`);
+        break;
+      }
+      workingMessages.push({ role: "assistant", content: response.content || [] });
+      response = await _post(apiKey, {
+        ...baseParams,
+        messages: applyCacheToLastMessage(workingMessages),
+      }, route);
+      if (response.usage) {
+        usageAcc.input_tokens += response.usage.input_tokens || 0;
+        usageAcc.output_tokens += response.usage.output_tokens || 0;
+        usageAcc.cache_creation_input_tokens += response.usage.cache_creation_input_tokens || 0;
+        usageAcc.cache_read_input_tokens += response.usage.cache_read_input_tokens || 0;
+      }
+      continue;
+    }
     iterations++;
     if (iterations > MAX_TOOL_ITERATIONS) {
       // The model still wants tools but has spent its budget. Breaking here
