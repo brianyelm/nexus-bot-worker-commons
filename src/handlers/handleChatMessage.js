@@ -1091,6 +1091,11 @@ export async function runLlmPipeline({
     const channelHistoryHandler = async (input) => {
       const slug = input?.channel_slug || channel_slug;
       const limit = Math.min(Math.max(parseInt(input?.limit) || 10, 1), 50);
+      // Per-bot override for the per-message body cap. The 500 default keeps
+      // token budgets flat fleet-wide; research bots that get briefed in long
+      // channel messages (Flynn) set HISTORY_BODY_MAX in wrangler vars, capped
+      // at Nexus's own 8000-char message limit.
+      const bodyMax = Math.min(Math.max(parseInt(env?.HISTORY_BODY_MAX) || 500, 100), 8000);
       const msgs = await fetchChannelMessages(env, slug, { ...nexusOptions, limit });
       if (!msgs) return { error: `Could not read messages from #${slug}. Check channel permissions.` };
       return {
@@ -1099,7 +1104,7 @@ export async function runLlmPipeline({
         messages: msgs.map((m) => ({
           message_id: m.id,
           author: m.display_name || m.user_id,
-          body: annotateGifBody((m.body || "").slice(0, 500)),
+          body: annotateGifBody((m.body || "").slice(0, bodyMax)),
           timestamp: m.created_at,
           attachments: Array.isArray(m.attachments)
             ? m.attachments.map((a) => ({
