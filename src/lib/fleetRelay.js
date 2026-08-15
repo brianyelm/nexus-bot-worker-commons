@@ -150,6 +150,18 @@ export const RELAY_TOOL_POLICY = Object.freeze({
   // Brian's personal calendar, email and to-dos. Another bot may ask her a
   // question; it may not read his diary or put anything on it.
   wren: Object.freeze(["read_channel_history"]),
+  // Flynn stays a forbidden relay TARGET for message_bot dispatch (Gate 1 and
+  // RELAY_FORBIDDEN_TARGETS unchanged), but research briefs posted into
+  // #flynn-lab by a bot (Hank driving fleet research, 2026-08-15, Brian's
+  // instruction) still reach him as bot-originated turns, and with zero tools
+  // he can only hallucinate his own searches. Web reads carry no fleet
+  // authority; worst case is burned search spend, bounded by the bot-to-bot
+  // mention budget. Every write and curriculum tool stays denied.
+  flynn: Object.freeze([
+    "read_channel_history",
+    "web_search",
+    "web_fetch",
+  ]),
   // maxwell, robert: no entry, and no inbound edge. Unreachable by Gate 1.
 });
 
