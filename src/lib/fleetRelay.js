@@ -146,10 +146,32 @@ export const RELAY_TOOL_POLICY = Object.freeze({
   ]),
   kate: Object.freeze([...RELAY_BASELINE_READS]),
   moxie: Object.freeze([...RELAY_BASELINE_READS]),
-  // Wren gets channel history and nothing else, on purpose. Her tool set is
-  // Brian's personal calendar, email and to-dos. Another bot may ask her a
-  // question; it may not read his diary or put anything on it.
-  wren: Object.freeze(["read_channel_history"]),
+  // Wren books, and books only. Widened from read_channel_history-only on
+  // Brian's instruction (2026-08-16), after Jacob relayed a "get a call with
+  // this new contact on Brian's calendar" ask and she could not act on it.
+  //
+  // The line is drawn at ADDING time, never at changing or answering for him:
+  // deliberately excluded are calendar_update_event and calendar_cancel_event
+  // (another bot may not move or kill a meeting that is already agreed),
+  // calendar_respond (nothing accepts or declines an invite as Brian but
+  // Brian), and every email, to-do, planner, reminder and cadence tool she
+  // owns. Her mailbox stays a human-only surface.
+  //
+  // calendar_create_event and calendar_create_teams_meeting both run the
+  // fetchUnionBusy conflict guard, and RELAY_INPUT_SCRUB below strips
+  // override_conflict so a relayed request cannot punch through it: the
+  // override exists for Brian's explicit say-so, and a bot does not have one.
+  wren: Object.freeze([
+    "read_channel_history",
+    "calendar_get_today",
+    "calendar_get_upcoming",
+    "calendar_get_week",
+    "calendar_search",
+    "calendar_get_event",
+    "calendar_find_free_times",
+    "calendar_create_event",
+    "calendar_create_teams_meeting",
+  ]),
   // Flynn stays a forbidden relay TARGET for message_bot dispatch (Gate 1 and
   // RELAY_FORBIDDEN_TARGETS unchanged), but research briefs posted into
   // #flynn-lab by a bot (Hank driving fleet research, 2026-08-15, Brian's
@@ -163,6 +185,23 @@ export const RELAY_TOOL_POLICY = Object.freeze({
     "web_fetch",
   ]),
   // maxwell, robert: no entry, and no inbound edge. Unreachable by Gate 1.
+});
+
+/**
+ * Input fields stripped from a bot-originated tool call, per tool.
+ *
+ * Kept separate from RELAY_TOOL_POLICY so the policy stays a flat list of tool
+ * names that anyone can read at a glance. This is for the narrower case where a
+ * tool is safe to relay but ONE of its arguments means "a human told me to
+ * ignore a safety check" -- an argument a bot can never truthfully supply.
+ *
+ * The stripped field is dropped, not rejected: the call still runs, it just
+ * runs with the guard on, which is the behaviour a relayed request should get.
+ */
+export const RELAY_INPUT_SCRUB = Object.freeze({
+  calendar_create_event: Object.freeze(["override_conflict"]),
+  calendar_create_teams_meeting: Object.freeze(["override_conflict"]),
+  calendar_update_event: Object.freeze(["override_conflict"]),
 });
 
 /**
@@ -465,7 +504,7 @@ export function applyRelayToolPolicy({ selfBot, tools = [], handlers = {} }) {
   const guardedHandlers = {};
   for (const [name, fn] of Object.entries(handlers)) {
     guardedHandlers[name] = allowSet.has(name)
-      ? fn
+      ? wrapWithInputScrub(name, fn)
       : async () => ({
           error:
             `Refused: "${name}" cannot be run for a request that came from another bot. Only a person can ` +
@@ -474,4 +513,58 @@ export function applyRelayToolPolicy({ selfBot, tools = [], handlers = {} }) {
   }
 
   return { tools: filteredTools, handlers: guardedHandlers, allowed };
+}
+
+/**
+ * Wrap one allowed handler so RELAY_INPUT_SCRUB fields never reach it.
+ *
+ * @param {string} name - tool name
+ * @param {Function} fn - the real handler
+ * @returns {Function} the handler, or a scrubbing wrapper around it
+ */
+function wrapWithInputScrub(name, fn) {
+  const fields = RELAY_INPUT_SCRUB[name];
+  if (!fields || typeof fn !== "function") return fn;
+  return (input, ...rest) => {
+    if (!input || typeof input !== "object") return fn(input, ...rest);
+    const scrubbed = { ...input };
+    let dropped = false;
+    for (const field of fields) {
+      if (field in scrubbed) {
+        delete scrubbed[field];
+        dropped = true;
+      }
+    }
+    if (dropped) {
+      console.warn(`[fleetRelay] scrubbed ${fields.join(", ")} from bot-originated ${name}`);
+    }
+    return fn(scrubbed, ...rest);
+  };
+}
+
+/**
+ * The system-prompt paragraph a bot reads when this turn came from another bot.
+ *
+ * Without this the downgrade is invisible: Gate 2 removes the tools before the
+ * model ever sees them, so the bot experiences "I cannot do that" with no idea
+ * why and invents a reason. Wren told Brian a calendar booking was impossible
+ * "from this channel" (2026-08-16), which was not the rule at all. State the
+ * real boundary and let the bot quote it.
+ *
+ * @param {string} selfBot - the receiving bot's id
+ * @returns {string} prompt text, empty string when the bot has no policy entry
+ */
+export function relayModeSystemNote(selfBot) {
+  const allowed = fleetRelayPolicyFor(selfBot);
+  if (allowed.length === 0) return "";
+  return (
+    "\n\nRELAYED REQUEST: this turn came from another bot on the fleet, not from a person." +
+    " On a relayed request you are restricted to exactly these tools: " +
+    allowed.join(", ") +
+    ". Everything else you normally do is unavailable for THIS turn by fleet policy, not because" +
+    " of the channel it arrived in and not because you doubt who asked. The relay names the person" +
+    " it is on behalf of and you may take that at face value. Do the part you can, then say plainly" +
+    " what you did and what still needs a person to ask you directly. Do not guess at the reason for" +
+    " the restriction, do not claim you cannot see who asked, and do not suggest trying another bot."
+  );
 }

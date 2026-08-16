@@ -9,11 +9,13 @@ import assert from "node:assert/strict";
 import {
   FLEET_RELAY_ROUTES,
   RELAY_TOOL_POLICY,
+  RELAY_INPUT_SCRUB,
   RELAY_FORBIDDEN_TARGETS,
   RELAY_EXCLUDED_CHANNELS,
   isRelayEdgeAllowed,
   fleetRelayPolicyFor,
   relayEdgeCount,
+  relayModeSystemNote,
   applyRelayToolPolicy,
   buildFleetRelayTools,
 } from "../src/lib/fleetRelay.js";
@@ -151,8 +153,65 @@ test("courtney may open a ticket but never reply to a client or touch the KB", (
   }
 });
 
-test("wren exposes nothing but channel history, so her calendar stays private", () => {
-  assert.deepEqual(fleetRelayPolicyFor("wren"), ["read_channel_history"]);
+test("wren may add to the calendar but never change, cancel or answer for brian", () => {
+  const allowed = fleetRelayPolicyFor("wren");
+  assert.ok(allowed.includes("calendar_find_free_times"));
+  assert.ok(allowed.includes("calendar_create_event"));
+  assert.ok(allowed.includes("calendar_create_teams_meeting"));
+  for (const blocked of [
+    "calendar_update_event",
+    "calendar_cancel_event",
+    "calendar_respond",
+    "email_send",
+    "email_reply",
+    "todo_create",
+    "reminder_create",
+  ]) {
+    assert.ok(!allowed.includes(blocked), `${blocked} must not be relay-reachable`);
+  }
+});
+
+test("wren's mailbox is not relay-reachable under any tool name", () => {
+  for (const tool of fleetRelayPolicyFor("wren")) {
+    assert.ok(
+      !/^email_|^cadence_/.test(tool),
+      `${tool} puts mail on a bot-originated path; relay must never send as Brian or Wren`,
+    );
+  }
+});
+
+test("a relayed booking cannot bypass the double-booking guard", async () => {
+  let seen = null;
+  const { handlers } = applyRelayToolPolicy({
+    selfBot: "wren",
+    tools: [],
+    handlers: { calendar_create_event: async (input) => { seen = input; return { ok: true }; } },
+  });
+  const result = await handlers.calendar_create_event(
+    { subject: "Call Kim Hossa", start: "2026-08-19T10:00:00", override_conflict: true },
+    {},
+    {},
+  );
+  assert.ok(result.ok, "the booking itself must still run");
+  assert.ok(!("override_conflict" in seen), "override_conflict must be scrubbed");
+  assert.equal(seen.subject, "Call Kim Hossa", "every other field survives untouched");
+});
+
+test("every scrubbed tool is one a relay can actually reach", () => {
+  const reachable = new Set(Object.keys(RELAY_TOOL_POLICY).flatMap((b) => RELAY_TOOL_POLICY[b]));
+  for (const tool of Object.keys(RELAY_INPUT_SCRUB)) {
+    if (!reachable.has(tool)) continue;
+    assert.ok(RELAY_INPUT_SCRUB[tool].length > 0, `${tool} scrub list must not be empty`);
+  }
+});
+
+test("relay mode tells the bot the real rule, and names every tool it kept", () => {
+  const note = relayModeSystemNote("wren");
+  for (const tool of fleetRelayPolicyFor("wren")) {
+    assert.ok(note.includes(tool), `${tool} must be named in the relay-mode note`);
+  }
+  assert.ok(/on behalf of/.test(note), "must tell the bot the relay names its human");
+  assert.equal(relayModeSystemNote("maxwell"), "", "a bot with no policy gets no note");
 });
 
 test("no relay policy anywhere exposes message_bot, which is hop limit 1", () => {

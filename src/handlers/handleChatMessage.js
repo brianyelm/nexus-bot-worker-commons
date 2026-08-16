@@ -47,7 +47,7 @@ import { phoenixToday } from "../lib/format.js";
 import { buildActionBreadcrumb } from "../lib/actionTrace.js";
 import { scrubFleetDashes } from "../lib/sanitize.js";
 import { collectSearchResultUrls, groundUrlsInText } from "../lib/researchShare.js";
-import { applyRelayToolPolicy } from "../lib/fleetRelay.js";
+import { applyRelayToolPolicy, relayModeSystemNote } from "../lib/fleetRelay.js";
 import { isFleetViewSource, deliverFleetViewReply } from "../lib/fleetviewDelivery.js";
 
 // Detect GIF-only messages so bots receive "[GIF image: <url>]" instead of
@@ -1060,7 +1060,10 @@ export async function runLlmPipeline({
     //
     // The concatenation order is exactly what it was before; only the cache
     // boundary moved, so no bot sees a different prompt.
-    const volatileSystem = (factsBlock || "") + NEXUS_CONTEXT + NEXUS_EMAIL_SAFETY + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + NEXUS_INFRA_GROUNDING + NEXUS_STYLE_CLOSE + FLEETVIEW_SURFACE + memoryRecallBlock + threadContextBlock + channelContextBlock + hitlContextBlock;
+    // Gate 2 strips tools silently (see line ~1324). Tell the bot the rule so it
+    // explains the real boundary instead of inventing one.
+    const RELAY_MODE = requester_is_bot ? relayModeSystemNote(config.botName) : "";
+    const volatileSystem = (factsBlock || "") + NEXUS_CONTEXT + NEXUS_EMAIL_SAFETY + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + NEXUS_INFRA_GROUNDING + NEXUS_STYLE_CLOSE + FLEETVIEW_SURFACE + RELAY_MODE + memoryRecallBlock + threadContextBlock + channelContextBlock + hitlContextBlock;
     const systemPromptWithFacts = [
       { text: systemPrompt, cache: true },
       { text: volatileSystem, cache: false },

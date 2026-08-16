@@ -55,8 +55,10 @@ export {
   fleetRelayPolicyFor,
   isRelayEdgeAllowed,
   relayEdgeCount,
+  relayModeSystemNote,
   FLEET_RELAY_ROUTES,
   RELAY_TOOL_POLICY,
+  RELAY_INPUT_SCRUB,
   RELAY_FORBIDDEN_TARGETS,
   RELAY_EXCLUDED_CHANNELS,
 } from "./lib/fleetRelay.js";
