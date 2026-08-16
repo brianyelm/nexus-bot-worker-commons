@@ -95,10 +95,18 @@ with the refusal telling the requester to have a human ask.
       courtney: ["desk_create_ticket", ...kb + desk reads],
       dexter:   [...reads only],
       kate:     [...reads only],
-      wren:     [...reads only],  // calendar/todo writes stay human-only
+      wren:     ["calendar_create_event", "calendar_create_teams_meeting", ...calendar reads],
       moxie:    [...reads only],
       // maxwell, robert: no policy entry. They are unreachable by Gate 1.
     }
+
+Wren's entry was reads-only until 2026-08-16, when Brian widened it after a
+Jacob relay ("get a call with this new contact on Brian's calendar") had nowhere
+to land. The line is at ADDING: another bot may put something on the calendar,
+and may read enough of it to pick a slot. It may not move, cancel, or RSVP to a
+meeting that already exists, and her mailbox stays human-only. `RELAY_INPUT_SCRUB`
+strips `override_conflict` from a relayed booking, so the cross-calendar
+double-booking guard cannot be waived by a request no human phrased.
 
 With the near-complete graph every open bot is now a RECEIVER, so this policy
 must exist for all six of them, not just the four that had inbound edges under
