@@ -56,6 +56,7 @@ export {
   isRelayEdgeAllowed,
   relayEdgeCount,
   relayModeSystemNote,
+  mirrorRelayReply,
   FLEET_RELAY_ROUTES,
   RELAY_TOOL_POLICY,
   RELAY_INPUT_SCRUB,

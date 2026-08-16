@@ -47,7 +47,7 @@ import { phoenixToday } from "../lib/format.js";
 import { buildActionBreadcrumb } from "../lib/actionTrace.js";
 import { scrubFleetDashes } from "../lib/sanitize.js";
 import { collectSearchResultUrls, groundUrlsInText } from "../lib/researchShare.js";
-import { applyRelayToolPolicy, relayModeSystemNote } from "../lib/fleetRelay.js";
+import { applyRelayToolPolicy, relayModeSystemNote, mirrorRelayReply } from "../lib/fleetRelay.js";
 import { isFleetViewSource, deliverFleetViewReply } from "../lib/fleetviewDelivery.js";
 
 // Detect GIF-only messages so bots receive "[GIF image: <url>]" instead of
@@ -1592,6 +1592,21 @@ export async function runLlmPipeline({
       await postToNexus(env, channel_slug, visibleResponse, nexusOptions);
     } catch (err) {
       console.error("[handleChatMessage] nexus post error:", err.message);
+    }
+
+    // Close the relay loop. A bot's reply only reaches the channel it was
+    // addressed in, so without this the channel the request came FROM sees the
+    // handoff leave and never sees it land. Best-effort and never fatal: the
+    // real answer is already posted above.
+    if (requester_is_bot) {
+      await mirrorRelayReply({
+        env,
+        senderUserId: user_id,
+        selfBot: config.botName,
+        repliedInChannel: channel_slug,
+        replyText: visibleResponse,
+        nexusOptions,
+      });
     }
 
     // Auto-listen: if the bot just asked a question, register a short-lived

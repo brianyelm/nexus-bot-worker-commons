@@ -17,6 +17,8 @@ import {
   relayEdgeCount,
   relayModeSystemNote,
   applyRelayToolPolicy,
+  mirrorRelayReply,
+  stripBotMentions,
   buildFleetRelayTools,
 } from "../src/lib/fleetRelay.js";
 import { withProvenance } from "../src/lib/provenanceContext.js";
@@ -243,6 +245,52 @@ test("gated handlers still run allowed tools untouched", async () => {
     handlers: { crm_create_prospect: original },
   });
   assert.equal(handlers.crm_create_prospect, original);
+});
+
+// --- Closing the loop: mirror back to the sender's home channel --------------
+
+test("a mirrored reply cannot @mention a bot into a fresh turn", () => {
+  const out = stripBotMentions("@Jacob it's booked. Ask @maxwell about the invoice, cc @Wren.");
+  assert.ok(!out.includes("@"), `no @ may survive: ${out}`);
+  assert.match(out, /Jacob it's booked/);
+  assert.match(out, /Maxwell/);
+  assert.match(out, /Wren/);
+});
+
+test("mirroring is skipped when there is nowhere new to send it", async () => {
+  // Sender is not a fleet bot, so there is no home channel to derive.
+  assert.equal(
+    await mirrorRelayReply({
+      env: {}, senderUserId: "bot_nobody", selfBot: "wren",
+      repliedInChannel: "wren-assistant", replyText: "done", nexusOptions: {},
+    }),
+    false,
+  );
+  // The reply already landed in the sender's own channel.
+  assert.equal(
+    await mirrorRelayReply({
+      env: {}, senderUserId: "bot_jacob", selfBot: "wren",
+      repliedInChannel: "jacob-sales", replyText: "done", nexusOptions: {},
+    }),
+    false,
+  );
+  // Nothing to say.
+  assert.equal(
+    await mirrorRelayReply({
+      env: {}, senderUserId: "bot_jacob", selfBot: "wren",
+      repliedInChannel: "wren-assistant", replyText: "", nexusOptions: {},
+    }),
+    false,
+  );
+});
+
+test("a failed mirror is swallowed, never thrown at the caller", async () => {
+  const env = {};
+  const result = await mirrorRelayReply({
+    env, senderUserId: "bot_jacob", selfBot: "wren",
+    repliedInChannel: "wren-assistant", replyText: "booked it", nexusOptions: {},
+  });
+  assert.equal(result, false, "no nexus key configured means no mirror, not a crash");
 });
 
 // --- Gate 1b + Gate 3: origin rules ------------------------------------------

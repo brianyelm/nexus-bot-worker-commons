@@ -516,6 +516,77 @@ export function applyRelayToolPolicy({ selfBot, tools = [], handlers = {} }) {
 }
 
 /**
+ * Mirror a relayed turn's reply back into the SENDING bot's home channel.
+ *
+ * The relay is one directional: the ask is posted in the target's home channel
+ * and the target's reply lands there too, because a bot's reply only ever goes
+ * to the channel it was addressed in. So the humans watching the channel the
+ * request came FROM see the handoff go out and never see it come back. Jacob
+ * relayed a booking three times and reported silence while Wren's confirmation
+ * sat in her own channel (2026-08-16).
+ *
+ * Deliberately NOT a tool. The model does not choose whether to close the loop,
+ * where to send it, or what to say: this fires after the reply is posted, to
+ * one derived channel, with the reply text it already wrote. There is nothing
+ * here for a relayed request to talk its way into.
+ *
+ * Bot @mentions are stripped from the mirrored copy. The sending bot holds
+ * can_listen = 1 on its own home channel, so an @mention would dispatch a fresh
+ * bot turn and turn a courtesy note into an unbudgeted extra hop. The mirror is
+ * for the people in the channel, not for the bot.
+ *
+ * @param {object} args
+ * @param {object} args.env - worker bindings
+ * @param {string} args.senderUserId - the requesting bot's Nexus id, e.g. "bot_jacob"
+ * @param {string} args.selfBot - the replying bot's id
+ * @param {string} args.repliedInChannel - channel the reply was already posted to
+ * @param {string} args.replyText - the reply as posted
+ * @param {object} args.nexusOptions - {nexusKeyEnvVar} for postToNexus
+ * @returns {Promise<boolean>} true when a mirror was posted
+ */
+export async function mirrorRelayReply({
+  env,
+  senderUserId,
+  selfBot,
+  repliedInChannel,
+  replyText,
+  nexusOptions,
+} = {}) {
+  const sender = String(senderUserId || "").replace(/^bot_/, "").toLowerCase();
+  const home = BOT_HOME_CHANNELS[sender]?.slug;
+  if (!home || !replyText) return false;
+  // Already posted there; the sender's channel WAS the conversation.
+  if (home === String(repliedInChannel || "").toLowerCase()) return false;
+
+  const body =
+    `Reply to the handoff from ${capitalize(sender)}, from ${capitalize(selfBot)}:\n\n` +
+    stripBotMentions(replyText).slice(0, MAX_RELAY_MESSAGE_LEN);
+
+  try {
+    const posted = await postToNexus(env, home, body, nexusOptions);
+    if (!posted) {
+      console.warn(`[fleetRelay] mirror to ${home} returned no message id`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error(`[fleetRelay] mirror ${selfBot} -> ${home} failed:`, err.message);
+    return false;
+  }
+}
+
+/**
+ * Defuse @mentions of fleet bots so a mirrored reply cannot dispatch a bot turn.
+ *
+ * @param {string} text
+ * @returns {string} the text with `@bot` rendered as the plain name
+ */
+export function stripBotMentions(text) {
+  const names = Object.keys(BOT_HOME_CHANNELS).join("|");
+  return String(text).replace(new RegExp(`@(${names})\\b`, "gi"), (_m, name) => capitalize(name));
+}
+
+/**
  * Wrap one allowed handler so RELAY_INPUT_SCRUB fields never reach it.
  *
  * @param {string} name - tool name
