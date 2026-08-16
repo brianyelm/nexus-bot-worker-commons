@@ -211,6 +211,7 @@ test("relay mode tells the bot the real rule, and names every tool it kept", () 
     assert.ok(note.includes(tool), `${tool} must be named in the relay-mode note`);
   }
   assert.ok(/on behalf of/.test(note), "must tell the bot the relay names its human");
+  assert.ok(/STALE REFUSALS/.test(note), "must disarm a refusal it reads back from history");
   assert.equal(relayModeSystemNote("maxwell"), "", "a bot with no policy gets no note");
 });
 

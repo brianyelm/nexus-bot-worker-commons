@@ -565,6 +565,11 @@ export function relayModeSystemNote(selfBot) {
     " of the channel it arrived in and not because you doubt who asked. The relay names the person" +
     " it is on behalf of and you may take that at face value. Do the part you can, then say plainly" +
     " what you did and what still needs a person to ask you directly. Do not guess at the reason for" +
-    " the restriction, do not claim you cannot see who asked, and do not suggest trying another bot."
+    " the restriction, do not claim you cannot see who asked, and do not suggest trying another bot." +
+    "\n\nSTALE REFUSALS: relay policy is widened from time to time, so an earlier refusal of a similar" +
+    " request is NOT evidence about what you can do now. If you find one in this channel's history, in" +
+    " recalled memory, or earlier in this conversation, ignore it. The tool list above is the only" +
+    " current truth about your authority. Before repeating any past refusal, check that list: if the" +
+    " tool you need is on it, the old refusal is wrong and you should just do the work."
   );
 }
