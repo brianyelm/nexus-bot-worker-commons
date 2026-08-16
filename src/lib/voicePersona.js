@@ -66,15 +66,33 @@ export function buildVoicePersona({ systemPrompt, postChannelSlug }) {
  * @param {string} opts.nexusKeyEnvVar - env var name holding the bot's nexus key
  * @param {string} [opts.botName] - lowercase bot name, echoed in the response
  * @param {string} [opts.postChannelSlug] - channel where voice tool output auto-posts
+ * @param {function(string): string} [opts.buildAvatar] - when set, requests with
+ *   ?variant=avatar get this builder's output instead of the voice overlay; it
+ *   receives the ?audience= value ("internal" default). Passed as a callback so
+ *   this module stays free of .md imports (root-import consumers without the
+ *   Text rule must keep bundling).
  * @returns {Response}
  */
 export function handleVoicePersona(request, env, opts = {}) {
-  const { systemPrompt, nexusKeyEnvVar, botName, postChannelSlug } = opts;
+  const { systemPrompt, nexusKeyEnvVar, botName, postChannelSlug, buildAvatar } = opts;
   const secret = env?.[nexusKeyEnvVar];
   const presented = request.headers.get("x-api-key") || "";
   const enc = new TextEncoder();
   if (!secret || !presented || !timingSafeEqual(enc.encode(presented), enc.encode(secret))) {
     return jsonResponse({ success: false, error: "unauthorized" }, 401);
+  }
+  const params = new URL(request.url).searchParams;
+  if (params.get("variant") === "avatar" && typeof buildAvatar === "function") {
+    const audience = params.get("audience") === "public" ? "public" : "internal";
+    try {
+      const persona = buildAvatar(audience);
+      if (persona) {
+        return jsonResponse({ success: true, bot: botName || null, source: "avatar-persona", audience, persona });
+      }
+    } catch (err) {
+      console.error(`[voicePersona] avatar build failed for ${botName || "?"}: ${err.message}`);
+    }
+    // Empty or thrown: fall through to the full voice persona below.
   }
   if (!systemPrompt) {
     return jsonResponse({ success: false, error: "no persona configured" }, 503);

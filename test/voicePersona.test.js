@@ -61,3 +61,71 @@ test("handleVoicePersona: authed but unconfigured persona is 503", () => {
   const res = handleVoicePersona(req("k"), { K: "k" }, { nexusKeyEnvVar: "K" });
   assert.equal(res.status, 503);
 });
+
+// ---- avatar variant ----
+
+import { buildAvatarPersona } from "../src/lib/avatarPersona.js";
+
+function avatarReq(key, query) {
+  const headers = new Headers();
+  if (key) headers.set("x-api-key", key);
+  return new Request(`https://bot.example/api/internal/voice-persona${query}`, { headers });
+}
+
+test("buildAvatarPersona: knowledge baked in, local-first rules present, no dashes", () => {
+  const persona = buildAvatarPersona({ identity: PROMPT, audience: "internal" });
+  assert.ok(persona.startsWith(PROMPT));
+  assert.ok(persona.includes("ANSWER FROM THIS PROMPT FIRST"));
+  assert.ok(persona.includes("ANNOUNCE EVERY LOOKUP"));
+  assert.ok(persona.includes("Live FAQ"));
+  // Internal audience carries the full knowledge set.
+  assert.ok(persona.includes("Qualifying Questions") || persona.includes("How We Price"));
+  assert.ok(!/\u2014|\u2013/.test(persona));
+});
+
+test("buildAvatarPersona: public audience strips internal sections", () => {
+  const persona = buildAvatarPersona({ identity: PROMPT, audience: "public" });
+  assert.ok(!persona.includes("Qualifying Questions"));
+  assert.ok(!persona.includes("Pricing Philosophy"));
+});
+
+test("handleVoicePersona: variant=avatar routes to the builder", async () => {
+  const res = handleVoicePersona(avatarReq("k", "?variant=avatar&audience=public"), { K: "k" }, {
+    systemPrompt: PROMPT,
+    nexusKeyEnvVar: "K",
+    botName: "jacob",
+    buildAvatar: (audience) => `AVATAR:${audience}`,
+  });
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.source, "avatar-persona");
+  assert.equal(body.persona, "AVATAR:public");
+});
+
+test("handleVoicePersona: unknown audience coerces to internal", async () => {
+  const res = handleVoicePersona(avatarReq("k", "?variant=avatar&audience=admin"), { K: "k" }, {
+    systemPrompt: PROMPT,
+    nexusKeyEnvVar: "K",
+    buildAvatar: (audience) => `AVATAR:${audience}`,
+  });
+  assert.equal((await res.json()).persona, "AVATAR:internal");
+});
+
+test("handleVoicePersona: avatar builder throwing falls back to the voice persona", async () => {
+  const res = handleVoicePersona(avatarReq("k", "?variant=avatar"), { K: "k" }, {
+    systemPrompt: PROMPT,
+    nexusKeyEnvVar: "K",
+    buildAvatar: () => { throw new Error("boom"); },
+  });
+  const body = await res.json();
+  assert.equal(body.source, "chat-persona");
+  assert.ok(body.persona.startsWith(PROMPT));
+});
+
+test("handleVoicePersona: no buildAvatar means variant param is ignored", async () => {
+  const res = handleVoicePersona(avatarReq("k", "?variant=avatar"), { K: "k" }, {
+    systemPrompt: PROMPT,
+    nexusKeyEnvVar: "K",
+  });
+  assert.equal((await res.json()).source, "chat-persona");
+});

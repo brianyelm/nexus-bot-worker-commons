@@ -29,8 +29,11 @@ import COMPANY_KNOWLEDGE from "./COMPANY_KNOWLEDGE.md";
 import SERVICE_OFFERINGS from "./SERVICE_OFFERINGS.md";
 import TEAM_AND_CONTACTS from "./TEAM_AND_CONTACTS.md";
 import COMPETITOR_DISPLACEMENT from "./COMPETITOR_DISPLACEMENT.md";
+// LIVE_FAQ is avatar-surface memory, deliberately NOT part of fleetKnowledge():
+// it restates knowledge in spoken form and would be duplication on chat surfaces.
+import LIVE_FAQ from "./LIVE_FAQ.md";
 
-export { COMPANY_KNOWLEDGE, SERVICE_OFFERINGS, TEAM_AND_CONTACTS, COMPETITOR_DISPLACEMENT };
+export { COMPANY_KNOWLEDGE, SERVICE_OFFERINGS, TEAM_AND_CONTACTS, COMPETITOR_DISPLACEMENT, LIVE_FAQ };
 
 /**
  * The outward facing set, in the order a stranger's questions tend to arrive:

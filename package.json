@@ -14,6 +14,7 @@
     "./lib/actionTrace": "./src/lib/actionTrace.js",
     "./lib/callbackSign": "./src/lib/callbackSign.js",
     "./lib/voicePersona": "./src/lib/voicePersona.js",
+    "./lib/avatarPersona": "./src/lib/avatarPersona.js",
     "./lib/commandParser": "./src/lib/commandParser.js",
     "./lib/history": "./src/lib/history.js",
     "./lib/memory": "./src/lib/memory.js",
