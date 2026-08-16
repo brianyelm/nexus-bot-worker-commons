@@ -8,10 +8,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildSystemBlocks } from "../src/lib/anthropic.js";
 
-test("a plain string still gets one cached block", () => {
+// The stable prefix also runs a 1h TTL: the 5m default expired between
+// human-paced turns, so every turn re-wrote the whole persona instead of
+// reading it (Flynn: 404k written vs 658k read on 2026-08-15).
+const HOUR = { type: "ephemeral", ttl: "1h" };
+
+test("a plain string still gets one cached block, on the long TTL", () => {
   const blocks = buildSystemBlocks("just the persona");
   assert.equal(blocks.length, 1);
-  assert.deepEqual(blocks[0].cache_control, { type: "ephemeral" });
+  assert.deepEqual(blocks[0].cache_control, HOUR);
 });
 
 test("segments cache the stable half and leave the volatile half uncached", () => {
@@ -21,9 +26,19 @@ test("segments cache the stable half and leave the volatile half uncached", () =
   ]);
   assert.equal(blocks.length, 2);
   assert.equal(blocks[0].text, "PERSONA");
-  assert.deepEqual(blocks[0].cache_control, { type: "ephemeral" });
+  assert.deepEqual(blocks[0].cache_control, HOUR);
   assert.equal(blocks[1].text, "today is Tuesday");
   assert.equal(blocks[1].cache_control, undefined);
+});
+
+test("ANTHROPIC_CACHE_TTL=5m reverts to the bare ephemeral form", () => {
+  const blocks = buildSystemBlocks("persona", { ANTHROPIC_CACHE_TTL: "5m" });
+  assert.deepEqual(blocks[0].cache_control, { type: "ephemeral" });
+});
+
+test("an explicit TTL override is passed through", () => {
+  const blocks = buildSystemBlocks("persona", { ANTHROPIC_CACHE_TTL: "1h" });
+  assert.deepEqual(blocks[0].cache_control, HOUR);
 });
 
 test("empty segments are dropped so no empty text block is sent", () => {

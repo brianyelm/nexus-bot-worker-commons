@@ -12,11 +12,27 @@
 //     max iterations is reached. Returns final assistant text.
 //
 // Cache strategy (mirrors EC2 robert-bot intentClassifier.js):
-//   - System prompt: cache_control { type: "ephemeral" } always.
-//   - Last tool definition: cache_control { type: "ephemeral" } if tools present.
-//   - Last user message content block: cache_control { type: "ephemeral" }.
+//   - System prompt: cache_control on the stable segments, 1h TTL.
+//   - Last tool definition: cache_control, 1h TTL, if tools present.
+//   - Last user message content block: cache_control, default 5m TTL.
 //   These breakpoints let the stable prefix (system + tools + N-1 messages)
 //   be served from Anthropic prompt cache at ~1/10th cost on subsequent turns.
+//
+// Why the stable prefix runs a 1h TTL (2026-08-16): the default ephemeral cache
+// expires after FIVE MINUTES, and a human-paced chat turn routinely exceeds
+// that. Every turn past the gap re-wrote the entire persona + tool-schema prefix
+// instead of reading it. On 2026-08-15 Flynn wrote 404k cache tokens against
+// 658k reads across a 9-turn conversation and Maxwell wrote 226k against 69k
+// reads -- roughly $2 of a $4 fleet day spent re-typing the same prompt. A 1h
+// write costs 2x base vs the 5m write's 1.25x, but it is paid ONCE per hour
+// instead of once per turn, so anything past the second turn is ahead.
+//
+// The message-tail breakpoint deliberately stays on the 5m default: that block
+// marks the growing conversation, so it is rewritten every turn no matter what
+// and a 1h write there would just cost 2x for nothing.
+//
+// Tunable per worker via the ANTHROPIC_CACHE_TTL var ("5m" reverts to the old
+// behavior) without a fleet redeploy.
 //
 // Tool handler convention: handler(input, env, ctx). ALWAYS in this order.
 //   input  = the tool_use block's .input object
@@ -37,6 +53,9 @@ const DEFAULT_MODEL = "claude-opus-4-7";
 const MAX_TOKENS = 4096;
 const TIMEOUT_MS = 60000;
 const MAX_TOOL_ITERATIONS = 10;
+// Cache TTL for the stable prefix. "1h" survives the gaps between human-paced
+// turns; the 5m default did not, which is what made every turn a full rewrite.
+const DEFAULT_PREFIX_CACHE_TTL = "1h";
 // Retry the idempotent HTTP POST (not tool execution) on transient failures.
 // 3 attempts with 1s then 5s backoff; classifier retries 429/5xx + network tells.
 const RETRY_ATTEMPTS = 3;
@@ -92,15 +111,33 @@ function applyCacheToLastMessage(messages) {
 }
 
 /**
- * Apply ephemeral cache_control to the last tool definition.
+ * Resolve the cache TTL for the STABLE prefix (system prompt + tool schemas).
+ * Defaults to 1h so a human-paced conversation stops re-writing the prefix on
+ * every turn; set ANTHROPIC_CACHE_TTL="5m" on a worker to revert.
+ *
+ * @param {object} env - Worker env
+ * @returns {{type: "ephemeral", ttl?: string}} cache_control value
+ */
+function prefixCacheControl(env) {
+  const ttl = (env?.ANTHROPIC_CACHE_TTL || DEFAULT_PREFIX_CACHE_TTL).trim();
+  // "5m" is the API default; sending it explicitly is legal but noisier in
+  // request diffs, so collapse it to the bare form.
+  return ttl === "5m" ? { type: "ephemeral" } : { type: "ephemeral", ttl };
+}
+
+/**
+ * Apply cache_control to the last tool definition. Tool schemas are part of the
+ * stable prefix, so they ride the long TTL.
  *
  * @param {Array} tools
+ * @param {object} env - Worker env (for ANTHROPIC_CACHE_TTL)
  * @returns {Array}
  */
-function applyCacheToTools(tools) {
+function applyCacheToTools(tools, env) {
   if (!Array.isArray(tools) || tools.length === 0) return tools;
+  const cacheControl = prefixCacheControl(env);
   return tools.map((t, i) =>
-    i === tools.length - 1 ? { ...t, cache_control: { type: "ephemeral" } } : t
+    i === tools.length - 1 ? { ...t, cache_control: cacheControl } : t
   );
 }
 
@@ -228,7 +265,7 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
     // specific job into adaptive by passing options.thinking. No-op on the
     // Haiku/Sonnet-4.6 paths that already ran thinking-off. (2026-07-01 fleet bump.)
     thinking: options.thinking || { type: "disabled" },
-    system: buildSystemBlocks(systemPrompt),
+    system: buildSystemBlocks(systemPrompt, env),
     messages: applyCacheToLastMessage(normalizeLeadingRole(messages)),
   };
   if (serverTools) body.tools = serverTools;
@@ -324,17 +361,19 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
  * Content and order are unchanged; only where the cache boundary sits moves.
  *
  * @param {string|Array<{text: string, cache?: boolean}>} systemPrompt
+ * @param {object} [env] - Worker env; supplies ANTHROPIC_CACHE_TTL
  * @returns {Array<object>} Anthropic system blocks
  */
-export function buildSystemBlocks(systemPrompt) {
+export function buildSystemBlocks(systemPrompt, env) {
+  const cacheControl = prefixCacheControl(env);
   if (typeof systemPrompt === "string") {
-    return [{ type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } }];
+    return [{ type: "text", text: systemPrompt, cache_control: cacheControl }];
   }
 
   return systemPrompt
     .filter((seg) => seg && seg.text)
     .map((seg) => (seg.cache
-      ? { type: "text", text: seg.text, cache_control: { type: "ephemeral" } }
+      ? { type: "text", text: seg.text, cache_control: cacheControl }
       : { type: "text", text: seg.text }));
 }
 
@@ -349,7 +388,7 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
   if (!apiKey) throw new Error("[anthropic] ANTHROPIC_API_KEY is not configured");
 
   const route = resolveAnthropicRoute(env, options.surface || "chat");
-  const toolsWithCache = applyCacheToTools(tools);
+  const toolsWithCache = applyCacheToTools(tools, env);
 
   const baseParams = {
     model,
@@ -357,7 +396,7 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
     // Pin thinking disabled by default (see callAnthropic note). Opt a job into
     // adaptive via options.thinking. No-op on Haiku/Sonnet-4.6 paths. (2026-07-01)
     thinking: options.thinking || { type: "disabled" },
-    system: buildSystemBlocks(systemPrompt),
+    system: buildSystemBlocks(systemPrompt, env),
     tools: toolsWithCache,
   };
 
