@@ -1063,10 +1063,35 @@ export async function runLlmPipeline({
     // Gate 2 strips tools silently (see line ~1324). Tell the bot the rule so it
     // explains the real boundary instead of inventing one.
     const RELAY_MODE = requester_is_bot ? relayModeSystemNote(config.botName) : "";
-    const volatileSystem = (factsBlock || "") + NEXUS_CONTEXT + NEXUS_EMAIL_SAFETY + NEXUS_TODAY + NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + NEXUS_INFRA_GROUNDING + NEXUS_STYLE_CLOSE + FLEETVIEW_SURFACE + RELAY_MODE + memoryRecallBlock + threadContextBlock + channelContextBlock + hitlContextBlock;
+    // Tell the bot what the injected block is, since it now arrives inside the
+    // user turn rather than the system prompt. Without this a bot reads its own
+    // grounding as something the human typed and answers "you told me it is
+    // Tuesday" instead of simply knowing the date.
+    const SESSION_CONTEXT_NOTE =
+      "\n\nSESSION CONTEXT: the newest user message carries a <session_context> block. That block is" +
+      " supplied by the system, NOT typed by the human, and it is authoritative: it holds the current" +
+      " date and time, who you are speaking with, stored facts, recalled memory, and recent channel or" +
+      " thread context. Treat it exactly as you would a system instruction. Never quote it back, never" +
+      " mention the tags, and never attribute its contents to the person you are talking to.";
+    // Split by CHANGES-BETWEEN-TURNS, not by topic. The cache prefix is ordered
+    // tools -> system -> messages, so ANY byte that moves inside `system`
+    // invalidates the whole conversation behind it. An uncached second system
+    // block does NOT contain the damage: the bytes still sit upstream of every
+    // message. NEXUS_TODAY carries the wall-clock TIME, so on its own it
+    // guaranteed a total history miss on every turn of every conversation
+    // (5067 tokens rewritten per turn, measured 2026-08-16).
+    //
+    // Only genuinely turn-invariant text may stay cached. NEXUS_CONTEXT and
+    // NEXUS_EMAIL_SAFETY look static but both embed the speaker's name and
+    // address, which change per message in a multi-person channel, so they ride
+    // the session block too.
+    const stableGuidance = NEXUS_MENTION_RULE + NEXUS_ACTION_INTEGRITY + NEXUS_INFRA_GROUNDING
+      + NEXUS_STYLE_CLOSE + SESSION_CONTEXT_NOTE;
+    const sessionContext = (factsBlock || "") + NEXUS_CONTEXT + NEXUS_EMAIL_SAFETY + NEXUS_TODAY
+      + FLEETVIEW_SURFACE + RELAY_MODE + memoryRecallBlock + threadContextBlock
+      + channelContextBlock + hitlContextBlock;
     const systemPromptWithFacts = [
-      { text: systemPrompt, cache: true },
-      { text: volatileSystem, cache: false },
+      { text: systemPrompt + stableGuidance, cache: true },
     ];
 
     const channelHistoryTool = {
@@ -1339,6 +1364,9 @@ export async function runLlmPipeline({
     }
 
     const modelOptions = {
+      // Everything that changes between turns. Rides the newest user turn so it
+      // sits BEHIND the cached history instead of invalidating it.
+      sessionContext,
       // FleetView pins the resolved model explicitly so the turn and the usage
       // report agree. By default this is the same model as a Nexus turn; a
       // FLEETVIEW_MODEL override exists for anyone willing to trade answer

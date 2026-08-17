@@ -11,12 +11,18 @@
 //     feeds results back, repeats until stop_reason is "end_turn" or
 //     max iterations is reached. Returns final assistant text.
 //
-// Cache strategy (mirrors EC2 robert-bot intentClassifier.js):
-//   - System prompt: cache_control on the stable segments.
-//   - Last tool definition: cache_control, if tools present.
-//   - Last user message content block: cache_control.
-//   These breakpoints let the stable prefix (system + tools + N-1 messages)
-//   be served from Anthropic prompt cache at ~1/10th cost on subsequent turns.
+// Cache strategy. FOUR breakpoints, which is the API maximum:
+//   1. System prompt, on the stable segments only.
+//   2. Last tool definition, if tools present.
+//   3. Last ASSISTANT message -- the newest byte-stable position in the array.
+//   4. Last message, so this turn extends the cache.
+//
+// Nothing that changes between turns may sit in `system`. The cache prefix is
+// ordered tools -> system -> messages, so a single changed byte up there
+// invalidates the ENTIRE conversation behind it, and splitting the volatile
+// text into its own uncached system block does not help: the bytes are still
+// upstream of every message. Per-turn context goes through options.sessionContext
+// instead, which hangs it off the newest user turn where it invalidates nothing.
 //
 // Why the TTL is 5m and not 1h (measured 2026-08-16). The two TTLs have very
 // different break-evens, because a read saves 0.9x base input while a 5m write
@@ -33,14 +39,12 @@
 // either TTL). So 1h was a coin flip priced at roughly $900/yr of downside, and
 // it went back to 5m before it ever saw production traffic.
 //
-// Revisit this ONLY after the volatile-system-block fix lands. Anything that
-// changes inside the `system` array invalidates the entire message history
-// behind it, because the cache prefix is ordered tools -> system -> messages.
-// Measured on Sonnet 5, same persona/tools/history, changing one small context
-// block in `system`: 5067 tokens written and 4711 read, versus 15 written and
-// 9747 read with that block moved into the final user turn. That is the real
-// leak; once it is fixed w:r drops far under 0.90 and 1h becomes worth pricing
-// again.
+// Worth re-pricing now that the volatile block has moved out of `system` and
+// the assistant anchor is in place: measured on Sonnet 5 with 8 exchanges of
+// history, the old shape wrote 5067 tokens and read 4711 per turn, the new one
+// writes 15 and reads 9747. That drops w:r far under the 0.90 bar where 1h
+// starts to win. Re-run scripts/cache-efficiency.mjs on a full week of the new
+// shape before flipping any worker to ANTHROPIC_CACHE_TTL="1h".
 //
 // Tunable per worker via the ANTHROPIC_CACHE_TTL var without a fleet redeploy.
 //
@@ -92,33 +96,93 @@ function normalizeLeadingRole(messages) {
 }
 
 /**
- * Apply ephemeral cache_control to the last content block of the last message.
- * Returns a shallow-cloned array; safe to pass the original messages in.
+ * Attach cache_control to the last content block of one message.
+ *
+ * @param {object} m - message
+ * @param {object} cacheControl
+ * @returns {object} cloned message
+ */
+function markMessage(m, cacheControl) {
+  if (typeof m.content === "string") {
+    return { role: m.role, content: [{ type: "text", text: m.content, cache_control: cacheControl }] };
+  }
+  if (Array.isArray(m.content) && m.content.length > 0) {
+    const lastIdx = m.content.length - 1;
+    return {
+      role: m.role,
+      content: m.content.map((b, j) => (j === lastIdx ? { ...b, cache_control: cacheControl } : b)),
+    };
+  }
+  return m;
+}
+
+/**
+ * Place the message-array cache breakpoints. Returns a shallow-cloned array;
+ * safe to pass the original messages in.
+ *
+ * TWO breakpoints, and the second one is the whole point:
+ *
+ *   1. The last ASSISTANT message, on the stable prefix TTL. This is the newest
+ *      position in the array that is guaranteed byte-identical on the next turn,
+ *      because nothing is ever injected into an assistant turn. It is what lets
+ *      the accumulated conversation be READ back instead of rewritten.
+ *   2. The last message, so the turn just added extends the cache.
+ *
+ * With only the tail breakpoint (the shape before 2026-08-16) the cached prefix
+ * moved every turn and the history behind it was rewritten rather than read.
+ * Measured on Sonnet 5 with 8 exchanges of history: 5067 tokens written and 4711
+ * read per turn, against 15 written and 9747 read once the anchor was added and
+ * the volatile block moved out of `system`.
  *
  * @param {Array} messages
+ * @param {object} [env] - Worker env; supplies ANTHROPIC_CACHE_TTL
  * @returns {Array}
  */
-function applyCacheToLastMessage(messages) {
+export function applyMessageCache(messages, env) {
   if (!messages || messages.length === 0) return messages;
+  const lastIdx = messages.length - 1;
+  let anchorIdx = -1;
+  for (let i = lastIdx; i >= 0; i--) {
+    if (messages[i].role === "assistant") { anchorIdx = i; break; }
+  }
+  const anchorControl = prefixCacheControl(env);
   return messages.map((m, i) => {
-    if (i !== messages.length - 1) return m;
-    if (typeof m.content === "string") {
-      return {
-        role: m.role,
-        content: [{ type: "text", text: m.content, cache_control: { type: "ephemeral" } }],
-      };
-    }
-    if (Array.isArray(m.content) && m.content.length > 0) {
-      const lastIdx = m.content.length - 1;
-      return {
-        role: m.role,
-        content: m.content.map((b, j) =>
-          j === lastIdx ? { ...b, cache_control: { type: "ephemeral" } } : b
-        ),
-      };
-    }
+    if (i === lastIdx) return markMessage(m, { type: "ephemeral" });
+    if (i === anchorIdx) return markMessage(m, anchorControl);
     return m;
   });
+}
+
+/**
+ * Hang the per-turn context (facts, current date/time, memory recall, channel
+ * and thread context) off the newest user turn instead of the system prompt.
+ *
+ * The cache prefix is ordered tools -> system -> messages, so ANY byte that
+ * changes inside `system` invalidates the entire message history behind it.
+ * That is true even when the volatile text is split into its own uncached
+ * system block, which is what commons used to do: the bytes still sit upstream
+ * of every message. NEXUS_TODAY alone carries the current wall-clock time, so
+ * it guaranteed a total history miss on every turn of every conversation.
+ *
+ * Moving it here puts it BEHIND the cached history, where it costs one small
+ * uncached block per request and invalidates nothing.
+ *
+ * @param {Array} messages
+ * @param {string} sessionContext
+ * @returns {Array}
+ */
+export function withSessionContext(messages, sessionContext) {
+  if (!sessionContext || !messages || messages.length === 0) return messages;
+  const lastIdx = messages.length - 1;
+  const last = messages[lastIdx];
+  // Only ever a genuine user turn: this runs before the tool loop starts, and
+  // a tool_result block must stay first in its message.
+  if (last.role !== "user") return messages;
+  const block = { type: "text", text: `<session_context>\n${sessionContext.trim()}\n</session_context>` };
+  const rest = typeof last.content === "string"
+    ? [{ type: "text", text: last.content }]
+    : last.content;
+  return [...messages.slice(0, lastIdx), { role: "user", content: [block, ...rest] }];
 }
 
 /**
@@ -250,6 +314,11 @@ function extractText(data) {
  * @param {Array<{role: string, content: string|Array}>} messages - Conversation turns
  * @param {object} [options]
  * @param {number} [options.maxTokens]
+ * @param {string} [options.sessionContext] - Per-turn grounding (date/time,
+ *   speaker, facts, memory recall, channel context). MUST go here rather than
+ *   into systemPrompt: anything volatile in `system` invalidates the entire
+ *   cached message history behind it. Injected as a <session_context> block on
+ *   the newest user turn.
  * @param {Array} [options.serverTools] - SERVER-executed tool definitions only
  *   (e.g. web_search_20250305). Anthropic runs these itself, so no handler
  *   loop is needed; this function just continues the turn on "pause_turn".
@@ -278,7 +347,10 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
     // Haiku/Sonnet-4.6 paths that already ran thinking-off. (2026-07-01 fleet bump.)
     thinking: options.thinking || { type: "disabled" },
     system: buildSystemBlocks(systemPrompt, env),
-    messages: applyCacheToLastMessage(normalizeLeadingRole(messages)),
+    messages: applyMessageCache(
+      withSessionContext(normalizeLeadingRole(messages), options.sessionContext),
+      env,
+    ),
   };
   if (serverTools) body.tools = serverTools;
 
@@ -291,11 +363,14 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
     // content so the search continues where it left off. Bounded so a stuck
     // turn cannot loop.
     let continuations = 0;
-    let workingMessages = normalizeLeadingRole([...messages]);
+    let workingMessages = withSessionContext(
+      normalizeLeadingRole([...messages]),
+      options.sessionContext,
+    );
     while (data.stop_reason === "pause_turn" && continuations < 2) {
       continuations++;
       workingMessages = [...workingMessages, { role: "assistant", content: data.content }];
-      data = await _post(apiKey, { ...body, messages: applyCacheToLastMessage(workingMessages) }, route);
+      data = await _post(apiKey, { ...body, messages: applyMessageCache(workingMessages, env) }, route);
       if (Array.isArray(data?.content)) allContent.push(...data.content);
     }
     if (typeof options.onServerToolContent === "function") {
@@ -347,6 +422,11 @@ export async function callAnthropic(env, systemPrompt, messages, options = {}) {
  * @param {object} handlers - { [toolName]: async (input, env, ctx) => any }
  * @param {object} [ctx] - Extra context passed to handlers
  * @param {object} [options]
+ * @param {string} [options.sessionContext] - Per-turn grounding (date/time,
+ *   speaker, facts, memory recall, channel context). MUST go here rather than
+ *   into systemPrompt: anything volatile in `system` invalidates the entire
+ *   cached message history behind it. Injected once, before the tool loop
+ *   starts, as a <session_context> block on the newest user turn.
  * @param {(turnIndex: number) => (void|Promise<void>)} [options.onTurnStart] - Hook
  *   called immediately before each Anthropic POST. turnIndex starts at 0 for
  *   the initial call, then increments per tool-loop iteration. Used by
@@ -412,7 +492,13 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
     tools: toolsWithCache,
   };
 
-  let workingMessages = normalizeLeadingRole([...messages]);
+  // Inject once, before the loop starts: the last message is still a genuine
+  // user turn here, and once the loop appends tool_result turns behind it the
+  // context rides along in place.
+  let workingMessages = withSessionContext(
+    normalizeLeadingRole([...messages]),
+    options.sessionContext,
+  );
   let iterations = 0;
   let response;
   let turnIndex = 0;
@@ -427,7 +513,7 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
 
   response = await _post(apiKey, {
     ...baseParams,
-    messages: applyCacheToLastMessage(workingMessages),
+    messages: applyMessageCache(workingMessages, env),
   }, route);
   if (response.usage) {
     usageAcc.input_tokens += response.usage.input_tokens || 0;
@@ -455,7 +541,7 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
       workingMessages.push({ role: "assistant", content: response.content || [] });
       response = await _post(apiKey, {
         ...baseParams,
-        messages: applyCacheToLastMessage(workingMessages),
+        messages: applyMessageCache(workingMessages, env),
       }, route);
       if (response.usage) {
         usageAcc.input_tokens += response.usage.input_tokens || 0;
@@ -499,7 +585,7 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
         response = await _post(apiKey, {
           ...baseParams,
           tool_choice: { type: "none" },
-          messages: applyCacheToLastMessage(workingMessages),
+          messages: applyMessageCache(workingMessages, env),
         }, route);
         if (response.usage) {
           usageAcc.input_tokens += response.usage.input_tokens || 0;
@@ -576,7 +662,7 @@ export async function callAnthropicWithTools(env, systemPrompt, messages, tools,
 
     response = await _post(apiKey, {
       ...baseParams,
-      messages: applyCacheToLastMessage(workingMessages),
+      messages: applyMessageCache(workingMessages, env),
     }, route);
     if (response.usage) {
       usageAcc.input_tokens += response.usage.input_tokens || 0;
