@@ -8,15 +8,17 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildSystemBlocks } from "../src/lib/anthropic.js";
 
-// The stable prefix also runs a 1h TTL: the 5m default expired between
-// human-paced turns, so every turn re-wrote the whole persona instead of
-// reading it (Flynn: 404k written vs 658k read on 2026-08-15).
+// The stable prefix runs the 5m TTL. A 1h write costs 1.00x base input against
+// the 5m write's 0.25x, so it only pays if the prefix is read back roughly four
+// times as often; the measured fleet traffic is nowhere near that bar. See the
+// header note in src/lib/anthropic.js for the arithmetic.
+const FIVE_MIN = { type: "ephemeral" };
 const HOUR = { type: "ephemeral", ttl: "1h" };
 
-test("a plain string still gets one cached block, on the long TTL", () => {
+test("a plain string still gets one cached block, on the short TTL", () => {
   const blocks = buildSystemBlocks("just the persona");
   assert.equal(blocks.length, 1);
-  assert.deepEqual(blocks[0].cache_control, HOUR);
+  assert.deepEqual(blocks[0].cache_control, FIVE_MIN);
 });
 
 test("segments cache the stable half and leave the volatile half uncached", () => {
@@ -26,17 +28,17 @@ test("segments cache the stable half and leave the volatile half uncached", () =
   ]);
   assert.equal(blocks.length, 2);
   assert.equal(blocks[0].text, "PERSONA");
-  assert.deepEqual(blocks[0].cache_control, HOUR);
+  assert.deepEqual(blocks[0].cache_control, FIVE_MIN);
   assert.equal(blocks[1].text, "today is Tuesday");
   assert.equal(blocks[1].cache_control, undefined);
 });
 
-test("ANTHROPIC_CACHE_TTL=5m reverts to the bare ephemeral form", () => {
+test("ANTHROPIC_CACHE_TTL=5m is the default and stays the bare ephemeral form", () => {
   const blocks = buildSystemBlocks("persona", { ANTHROPIC_CACHE_TTL: "5m" });
-  assert.deepEqual(blocks[0].cache_control, { type: "ephemeral" });
+  assert.deepEqual(blocks[0].cache_control, FIVE_MIN);
 });
 
-test("an explicit TTL override is passed through", () => {
+test("a worker can opt into the 1h TTL explicitly", () => {
   const blocks = buildSystemBlocks("persona", { ANTHROPIC_CACHE_TTL: "1h" });
   assert.deepEqual(blocks[0].cache_control, HOUR);
 });

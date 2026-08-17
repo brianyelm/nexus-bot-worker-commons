@@ -12,27 +12,37 @@
 //     max iterations is reached. Returns final assistant text.
 //
 // Cache strategy (mirrors EC2 robert-bot intentClassifier.js):
-//   - System prompt: cache_control on the stable segments, 1h TTL.
-//   - Last tool definition: cache_control, 1h TTL, if tools present.
-//   - Last user message content block: cache_control, default 5m TTL.
+//   - System prompt: cache_control on the stable segments.
+//   - Last tool definition: cache_control, if tools present.
+//   - Last user message content block: cache_control.
 //   These breakpoints let the stable prefix (system + tools + N-1 messages)
 //   be served from Anthropic prompt cache at ~1/10th cost on subsequent turns.
 //
-// Why the stable prefix runs a 1h TTL (2026-08-16): the default ephemeral cache
-// expires after FIVE MINUTES, and a human-paced chat turn routinely exceeds
-// that. Every turn past the gap re-wrote the entire persona + tool-schema prefix
-// instead of reading it. On 2026-08-15 Flynn wrote 404k cache tokens against
-// 658k reads across a 9-turn conversation and Maxwell wrote 226k against 69k
-// reads -- roughly $2 of a $4 fleet day spent re-typing the same prompt. A 1h
-// write costs 2x base vs the 5m write's 1.25x, but it is paid ONCE per hour
-// instead of once per turn, so anything past the second turn is ahead.
+// Why the TTL is 5m and not 1h (measured 2026-08-16). The two TTLs have very
+// different break-evens, because a read saves 0.9x base input while a 5m write
+// costs 0.25x and a 1h write costs 1.00x:
 //
-// The message-tail breakpoint deliberately stays on the 5m default: that block
-// marks the growing conversation, so it is rewritten every turn no matter what
-// and a 1h write there would just cost 2x for nothing.
+//     net = 0.9 * read - 0.25 * write5m - 1.00 * write1h
 //
-// Tunable per worker via the ANTHROPIC_CACHE_TTL var ("5m" reverts to the old
-// behavior) without a fleet redeploy.
+// Break-even is w:r < 3.60 on 5m but w:r < 0.90 on 1h -- a 4x tighter bar. Over
+// 2026-08-09..15 the fleet ran w:r 0.81 and the cache EARNED $17.35 on a $52.19
+// spend. Repricing that same traffic on 1h needs ~39% of writes to convert into
+// reads just to match 5m, and the measured turn-gap distribution puts only ~26%
+// of turns in the 5m-to-1h window where a longer TTL changes anything at all.
+// The rest are either seconds apart (already cached) or hours apart (hopeless at
+// either TTL). So 1h was a coin flip priced at roughly $900/yr of downside, and
+// it went back to 5m before it ever saw production traffic.
+//
+// Revisit this ONLY after the volatile-system-block fix lands. Anything that
+// changes inside the `system` array invalidates the entire message history
+// behind it, because the cache prefix is ordered tools -> system -> messages.
+// Measured on Sonnet 5, same persona/tools/history, changing one small context
+// block in `system`: 5067 tokens written and 4711 read, versus 15 written and
+// 9747 read with that block moved into the final user turn. That is the real
+// leak; once it is fixed w:r drops far under 0.90 and 1h becomes worth pricing
+// again.
+//
+// Tunable per worker via the ANTHROPIC_CACHE_TTL var without a fleet redeploy.
 //
 // Tool handler convention: handler(input, env, ctx). ALWAYS in this order.
 //   input  = the tool_use block's .input object
@@ -53,9 +63,10 @@ const DEFAULT_MODEL = "claude-opus-4-7";
 const MAX_TOKENS = 4096;
 const TIMEOUT_MS = 60000;
 const MAX_TOOL_ITERATIONS = 10;
-// Cache TTL for the stable prefix. "1h" survives the gaps between human-paced
-// turns; the 5m default did not, which is what made every turn a full rewrite.
-const DEFAULT_PREFIX_CACHE_TTL = "1h";
+// Cache TTL for the stable prefix. 5m, because a 1h write costs 1.00x base
+// against the 5m write's 0.25x and the measured traffic does not read it back
+// often enough to earn the difference (see the header note).
+const DEFAULT_PREFIX_CACHE_TTL = "5m";
 // Retry the idempotent HTTP POST (not tool execution) on transient failures.
 // 3 attempts with 1s then 5s backoff; classifier retries 429/5xx + network tells.
 const RETRY_ATTEMPTS = 3;
@@ -112,8 +123,9 @@ function applyCacheToLastMessage(messages) {
 
 /**
  * Resolve the cache TTL for the STABLE prefix (system prompt + tool schemas).
- * Defaults to 1h so a human-paced conversation stops re-writing the prefix on
- * every turn; set ANTHROPIC_CACHE_TTL="5m" on a worker to revert.
+ * Defaults to 5m, which is where the measured traffic makes money; set
+ * ANTHROPIC_CACHE_TTL="1h" on a worker to opt that worker into the long TTL
+ * once its write:read ratio is proven to sit under 0.90.
  *
  * @param {object} env - Worker env
  * @returns {{type: "ephemeral", ttl?: string}} cache_control value
