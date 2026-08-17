@@ -43,6 +43,7 @@ export { resolveEntity, getEntityContext, persistTurnPair, assertFact } from "./
 export { buildContactRecall } from "./lib/memoryRecall.js";
 export { senderTrust } from "./lib/mailTrust.js";
 export { isAutomaticReply } from "./lib/mailSafety.js";
+export { renderEmailHeader, renderEmailForPrompt } from "./lib/emailHeader.js";
 export { stageExternalReply, handleExternalReplyGate, handleExternalReplyModal, replySubject } from "./lib/externalReplyGate.js";
 export { parseGraphResponse } from "./lib/graphJson.js";
 export { looksLikeIncomingPayment } from "./lib/incomingPayment.js";
