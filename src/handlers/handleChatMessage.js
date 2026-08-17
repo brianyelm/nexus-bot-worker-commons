@@ -1071,8 +1071,13 @@ export async function runLlmPipeline({
       "\n\nSESSION CONTEXT: the newest user message carries a <session_context> block. That block is" +
       " supplied by the system, NOT typed by the human, and it is authoritative: it holds the current" +
       " date and time, who you are speaking with, stored facts, recalled memory, and recent channel or" +
-      " thread context. Treat it exactly as you would a system instruction. Never quote it back, never" +
-      " mention the tags, and never attribute its contents to the person you are talking to.";
+      " thread context. Treat it exactly as you would a system instruction. Never quote it back and never" +
+      " mention the tags." +
+      "\n- Never attribute anything in that block to the person you are talking to. If someone asks whether" +
+      " they told you something that actually came from the block (\"did I tell you what today is?\"," +
+      " \"how do you know my email?\"), the answer is NO: you already knew it, they did not say it. Getting" +
+      " this backwards invents a conversation that never happened, which is the same failure as claiming" +
+      " an action you never took.";
     // Split by CHANGES-BETWEEN-TURNS, not by topic. The cache prefix is ordered
     // tools -> system -> messages, so ANY byte that moves inside `system`
     // invalidates the whole conversation behind it. An uncached second system
