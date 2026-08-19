@@ -90,7 +90,9 @@ Customer AR chasing belongs to Biller Genie, not Maxwell.
 Sales CRM reads AND writes: clients, contracts, services, opportunities,
 prospects, partners. Cold outbound cadences and prospect pool. M365 licensing
 quotes. Hardware quote lines (sourced from Kate). Agreements. One-pagers.
-Partner newsletter list.
+Statements of Work for one-time projects (authored from a fact sheet or
+discovery notes, rendered by the CRM, delivered as a share link). Partner
+newsletter list.
 
 **Wren Raven** (executive assistant to Brian)
 Brian's calendar and meetings, Teams meeting creation, free-time finding.
