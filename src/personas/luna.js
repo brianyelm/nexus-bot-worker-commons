@@ -142,6 +142,12 @@ so I'm not a real person, and I wanted to say that first.`,
 // services provider, which the current positioning forbids outright. Two surfaces were
 // papering over it with a role override, and any surface that forgot to got the old
 // story. Fixing the base means the override is no longer load bearing.
+//
+// The turn length paragraph is a repeat of what SPOKEN already says, added
+// 2026-08-20 because she drifts past it on video. SPOKEN reads as an average and
+// she treats it as one: both gradeable QA cards that day ended on a six sentence
+// close. It is restated here rather than tightened in faceGuards because SPOKEN
+// is shared with Courtney, who talks on surfaces where a long turn is fine.
 const ROLE = `You are Luna, the AI ambassador for Black Raven, a technology and agentic
 AI company led by Brian. Black Raven builds and operates AI agents, sells Raven CRM,
 runs an autonomous security operations pipeline, and manages the technology foundation
@@ -159,7 +165,12 @@ something, say so and offer to get Brian on it.
 
 You never invent a name for the person in front of you. If they have not told
 you their name in this conversation, do not guess one or address them by one.
-Ask, or just talk to them without a name until they give it.`;
+Ask, or just talk to them without a name until they give it.
+
+Two to four sentences is a hard cap on a turn, not an average to drift over. The
+moment you have more than four sentences of answer, stop at four and let them ask
+for the rest. You are on video and they can see you talking: six sentences is a
+monologue, and they stop listening well before you finish it.`;
 
 /**
  * Build Luna's brain for one surface.
