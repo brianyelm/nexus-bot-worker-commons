@@ -72,6 +72,25 @@ export function shouldMirrorToHomeChannel(answer, signals = {}) {
 }
 
 /**
+ * Cloudflare Access service-token headers for the FleetView callback, when the
+ * worker has them bound. Returns an empty object if either half is missing, so
+ * a bot that has not been given the token yet still delivers while the Access
+ * policy is permissive, and fails loudly at the edge once it is not.
+ *
+ * @param {object} env - worker bindings
+ * @returns {Record<string, string>}
+ */
+function accessServiceTokenHeaders(env) {
+  const clientId = env.FLEETVIEW_ACCESS_CLIENT_ID;
+  const clientSecret = env.FLEETVIEW_ACCESS_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    console.warn("[fleetview] no Access service token bound; the callback will be rejected at the edge");
+    return {};
+  }
+  return { "CF-Access-Client-Id": clientId, "CF-Access-Client-Secret": clientSecret };
+}
+
+/**
  * POST the finished answer back to FleetView, HMAC-signed the same way Nexus
  * signs bot callbacks so the receiver can reuse verifyNexusSignature.
  *
@@ -91,6 +110,12 @@ async function postSignedReply(env, replyWebhook, payload) {
   // for the fetch body would risk signing something other than what is sent.
   const rawBody = JSON.stringify(payload);
 
+  // Cloudflare Access sits in front of the callback path with a service-token
+  // policy, so junk traffic is rejected at the edge before it costs a worker
+  // invocation. The HMAC below is still the real authentication: these headers
+  // only get the request through the front door.
+  const accessHeaders = accessServiceTokenHeaders(env);
+
   for (let attempt = 1; attempt <= WEBHOOK_ATTEMPTS; attempt++) {
     try {
       const { timestamp, signature } = await signCallback(secret, rawBody);
@@ -100,6 +125,7 @@ async function postSignedReply(env, replyWebhook, payload) {
           "content-type": "application/json",
           "X-Nexus-Timestamp": timestamp,
           "X-Nexus-Signature": signature,
+          ...accessHeaders,
         },
         body: rawBody,
         // Never follow a redirect. An identity proxy in front of FleetView
@@ -131,6 +157,13 @@ async function postSignedReply(env, replyWebhook, payload) {
       }
       const txt = await res.text().catch(() => "");
       console.warn(`[fleetview] reply webhook ${res.status} (attempt ${attempt}): ${txt.slice(0, 200)}`);
+      // A 403 here is Cloudflare Access, not the worker: the service token is
+      // missing, wrong, or expired. Retrying with the same credentials cannot
+      // help, and the fix is a token rotation, not a redelivery.
+      if (res.status === 403) {
+        console.error("[fleetview] Access rejected the service token; check FLEETVIEW_ACCESS_CLIENT_ID/SECRET");
+        return false;
+      }
       // A rejected signature or a bad thread id will not fix itself on retry.
       if (res.status === 401 || res.status === 404) return false;
     } catch (err) {
